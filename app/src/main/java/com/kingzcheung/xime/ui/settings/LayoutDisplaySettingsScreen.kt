@@ -72,6 +72,10 @@ fun LayoutDisplaySettingsContent(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
+                KeyboardLayoutSettingsSection()
+            }
+
+            item {
                 SettingsSection(title = "候选词", content = {
                     val candidateTextSizePref = SettingsPreferences.getCandidateTextSize(context)
                     var candidateTextSize by remember(candidateTextSizePref) {
