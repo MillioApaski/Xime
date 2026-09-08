@@ -1,19 +1,18 @@
 package com.kingzcheung.xime.ui.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -28,9 +27,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.kingzcheung.xime.settings.KeyboardLayoutPreferences
 import com.kingzcheung.xime.settings.KeyboardLayoutPreset
@@ -114,7 +116,7 @@ fun KeyboardLayoutSettingsSection() {
                 Column(Modifier.weight(1f)) {
                     Text("Gboard 底栏顺序", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "这是可视化自定义的第一步：可直接移动功能键，运行中的输入法会即时读取。",
+                        "长按任意按键后左右拖动即可重排，例如把语言键拖到空格左边；输入法会即时读取。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -169,6 +171,8 @@ private fun BottomRowEditor(
     order: List<String>,
     onChange: (List<String>) -> Unit,
 ) {
+    val density = LocalDensity.current
+    val swapThresholdPx = with(density) { 28.dp.toPx() }
     val labels = mapOf(
         "mode" to "?123",
         "comma" to ",",
@@ -177,54 +181,65 @@ private fun BottomRowEditor(
         "period" to ".",
         "enter" to "Enter",
     )
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        order.forEachIndexed { index, id ->
-            Row(
+    val weights = mapOf(
+        "mode" to 1.5f,
+        "comma" to 1f,
+        "language" to 1f,
+        "space" to 4f,
+        "period" to 1f,
+        "enter" to 1.5f,
+    )
+
+    Row(
+        modifier = Modifier.fillMaxWidth().height(58.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        order.forEach { id ->
+            var dragX by remember(id) { mutableStateOf(0f) }
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .weight(weights[id] ?: 1f)
+                    .fillMaxHeight()
+                    .padding(2.dp)
+                    .background(
+                        if (id == "space") MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surfaceVariant,
+                        RoundedCornerShape(9.dp),
+                    )
+                    .pointerInput(id, order) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { dragX = 0f },
+                            onDragCancel = { dragX = 0f },
+                            onDragEnd = { dragX = 0f },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                dragX += dragAmount.x
+                                val index = order.indexOf(id)
+                                if (dragX <= -swapThresholdPx && index > 0) {
+                                    val mutable = order.toMutableList()
+                                    mutable[index] = mutable[index - 1]
+                                    mutable[index - 1] = id
+                                    dragX = 0f
+                                    onChange(mutable)
+                                } else if (dragX >= swapThresholdPx && index >= 0 && index < order.lastIndex) {
+                                    val mutable = order.toMutableList()
+                                    mutable[index] = mutable[index + 1]
+                                    mutable[index + 1] = id
+                                    dragX = 0f
+                                    onChange(mutable)
+                                }
+                            },
+                        )
+                    },
+                contentAlignment = Alignment.Center,
             ) {
-                Box(modifier = Modifier.width(74.dp)) {
-                    Text(labels[id] ?: id, fontWeight = if (id == "space") FontWeight.SemiBold else FontWeight.Normal)
-                }
                 Text(
-                    when (id) {
-                        "language" -> "语言切换"
-                        "space" -> "空格"
-                        "mode" -> "数字/符号"
-                        "comma" -> "逗号"
-                        "period" -> "句号"
-                        "enter" -> "回车"
-                        else -> id
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
+                    text = labels[id] ?: id,
+                    style = if (id == "space") MaterialTheme.typography.bodyMedium else MaterialTheme.typography.labelMedium,
+                    fontWeight = if (id == "space") FontWeight.SemiBold else FontWeight.Normal,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
                 )
-                IconButton(
-                    enabled = index > 0,
-                    onClick = {
-                        val mutable = order.toMutableList()
-                        val item = mutable.removeAt(index)
-                        mutable.add(index - 1, item)
-                        onChange(mutable)
-                    },
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "左移")
-                }
-                IconButton(
-                    enabled = index < order.lastIndex,
-                    onClick = {
-                        val mutable = order.toMutableList()
-                        val item = mutable.removeAt(index)
-                        mutable.add(index + 1, item)
-                        onChange(mutable)
-                    },
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "右移")
-                }
             }
         }
     }
