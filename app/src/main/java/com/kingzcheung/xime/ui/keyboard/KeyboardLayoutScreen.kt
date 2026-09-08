@@ -116,7 +116,7 @@ fun KeyboardLayoutScreen(
                         modifier = modifier,
                     )
                 } else {
-                    KeyboardLayout(
+                    ConfigurableKeyboardLayout(
                         onKeyPress = onKeyPress,
                         viewModel = viewModel,
                         callbacks = callbacks,
@@ -145,7 +145,7 @@ fun KeyboardLayoutScreen(
                         modifier = modifier,
                     )
                 } else {
-                    KeyboardLayout(
+                    ConfigurableKeyboardLayout(
                         onKeyPress = onKeyPress,
                         viewModel = viewModel,
                         callbacks = callbacks,
