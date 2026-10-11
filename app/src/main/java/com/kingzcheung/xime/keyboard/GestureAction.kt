@@ -30,6 +30,12 @@ interface ActionExecutor {
     fun sendKeyEvent(keyCode: Int)
 
     /**
+     * 移动光标。组合态移动编码编辑光标（与空格左右滑同一路径），空闲态移动编辑器光标。
+     * @param direction 移动步数，负值向左、正值向右
+     */
+    fun moveCursor(direction: Int)
+
+    /**
      * 执行内置命令。
      * @param name 命令名，如 "clear_composition"（清空输入）
      */
@@ -83,6 +89,15 @@ enum class GestureAction(val value: String) {
 
     /** 移动到行尾。 */
     LINE_END("line_end"),
+
+    /** Tab 键：发送 KEYCODE_TAB（缩进/焦点切换，平板布局行 1 左端用）。 */
+    TAB("tab"),
+
+    /** 光标左移一步（组合态移编码编辑光标，空闲态移编辑器光标）。 */
+    CURSOR_LEFT("cursor_left"),
+
+    /** 光标右移一步（组合态移编码编辑光标，空闲态移编辑器光标）。 */
+    CURSOR_RIGHT("cursor_right"),
 
     /** 撤销。 */
     UNDO("undo"),

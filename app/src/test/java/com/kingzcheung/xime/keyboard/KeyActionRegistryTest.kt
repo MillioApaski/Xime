@@ -53,6 +53,16 @@ class KeyActionRegistryTest {
     }
 
     @Test
+    fun `光标动作按方向分发 moveCursor`() {
+        assertEquals(ActionDomain.SERVICE, KeyActionRegistry.fromId("cursor_left")!!.domain)
+        assertEquals(ActionDomain.SERVICE, KeyActionRegistry.fromId("cursor_right")!!.domain)
+        val executor = RecordingExecutor()
+        KeyActionRegistry.execute(GestureAction.CURSOR_LEFT, KeyActionContext(executor), "")
+        KeyActionRegistry.execute(GestureAction.CURSOR_RIGHT, KeyActionContext(executor), "")
+        assertEquals(listOf(-1, 1), executor.cursorMoves)
+    }
+
+    @Test
     fun `既有命令已登记为服务域动作`() {
         assertEquals(ActionDomain.SERVICE, KeyActionRegistry.fromCommand("clear_composition")!!.domain)
         assertEquals(ActionDomain.SERVICE, KeyActionRegistry.fromCommand("show_ime_picker")!!.domain)
@@ -88,10 +98,14 @@ class KeyActionRegistryTest {
     private class RecordingExecutor : ActionExecutor {
         val commands = mutableListOf<String>()
         val dispatched = mutableListOf<String>()
+        val cursorMoves = mutableListOf<Int>()
 
         override fun commitText(text: String) = Unit
         override fun performEditorMenuAction(actionId: Int) = Unit
         override fun sendKeyEvent(keyCode: Int) = Unit
+        override fun moveCursor(direction: Int) {
+            cursorMoves.add(direction)
+        }
         override fun executeCommand(name: String) {
             commands.add(name)
         }
