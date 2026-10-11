@@ -44,6 +44,7 @@ import com.kingzcheung.xime.keyboard.GestureAction
 import com.kingzcheung.xime.settings.DisplayMode
 import com.kingzcheung.xime.settings.KeysConfigHelper
 import com.kingzcheung.xime.settings.swipeHandlerFor
+import com.kingzcheung.xime.ui.isTablet
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -166,6 +167,29 @@ fun T9KeyboardLayout(
 }
 
 
+// ─── 九键左栏（候选/符号列）几何：键盘态与候选展开页共用同一公式 ────────
+
+/** 九键三列之间的 `Arrangement.spacedBy`（共 2 个间隙）。 */
+internal const val T9_COLUMN_GAP_DP = 2f
+
+/**
+ * 九键左栏是否显示：竖屏一直有；手机横屏键矮，左栏让位给顶部候选栏；
+ * 平板横屏键盘区足够高，与竖屏同款（见 [T9KeyboardSwipeOverlay] 的 compactLandscape）。
+ */
+internal fun t9HasLeftRail(isLandscape: Boolean, isTablet: Boolean): Boolean = !isLandscape || isTablet
+
+/**
+ * 九键左栏列宽（dp）：与键盘态左栏同一条公式，供候选展开页复刻左栏
+ * （展开/收起时左栏不横移）。
+ *
+ * 键位区基数 = 页宽 − 两侧外围留白（[keyboardSidePaddingDp]）− 2 个列间隙；
+ * 左栏权重 0.8 / 三列总权重 5。
+ */
+internal fun t9LeftRailWidthDp(pageWidthDp: Float, isTablet: Boolean): Float {
+    val base = pageWidthDp - 2 * keyboardSidePaddingDp(isTablet) - 2 * T9_COLUMN_GAP_DP
+    return (base * 0.8f / 5f).coerceAtLeast(32f)
+}
+
 // ─── 滑动气泡覆盖层（隔离 swipeState 作用域，避免全键盘重组） ────────
 
 @Composable
@@ -197,6 +221,11 @@ private fun T9KeyboardSwipeOverlay(
 ) {
     val swipeBubble = rememberSwipeBubbleController()
     var keyboardBounds by remember { mutableStateOf(Rect(0f, 0f, 0f, 0f)) }
+    // 设备档：平板键盘区高度约为手机的 1.6 倍（键盘高 = 屏高 × 比例），所以
+    // ① 横屏紧凑档（去掉左栏 + 收小字号）只在手机横屏生效，平板横屏用竖屏同款布局；
+    // ② 外围留白/提示档按设备档（`panelOuterPadding` 与 26 键、面板共用同一条）。
+    val tablet = isTablet()
+    val compactLandscape = isLandscape && !tablet
 
     fun processSwipeState(state: SwipeState, bounds: Rect) {
         val newState = if (state.isSwipeDown && state.swipeText != null) {
@@ -227,7 +256,15 @@ private fun T9KeyboardSwipeOverlay(
         keyboardWidth = keyboardBounds.width
     )
 
-    CompositionLocalProvider(LocalKeyCornerRadius provides keyCornerRadius) {
+    // 外围留白与设备档（面板/26 键同源）：手机竖屏 4/4/8、手机横屏 50/2、平板 16/16/8
+    val outerPadding = panelOuterPadding(isLandscape = isLandscape, isTablet = tablet)
+
+    CompositionLocalProvider(
+        LocalKeyCornerRadius provides keyCornerRadius,
+        // 键面提示与主键盘同一档：手机横屏/平板画到键角，平板放大加深
+        LocalSwipeHintCorner provides swipeHintCornerFor(isLandscape, tablet),
+        LocalHintExtraScale provides hintExtraScaleFor(tablet),
+    ) {
     Box(
         modifier = modifier
             .onGloballyPositioned { coordinates ->
@@ -238,8 +275,8 @@ private fun T9KeyboardSwipeOverlay(
                 bubbleData?.let { drawSwipeBubble(it) }
             }
             .padding(bottom = if (isFloatingMode || isLandscape) 0.dp else 0.dp)) {
-        if (isLandscape) {
-            // 横屏：去除原左侧候选大面板（候选已在顶部候选栏展示），
+        if (compactLandscape) {
+            // 手机横屏：去除原左侧候选大面板（候选已在顶部候选栏展示），
             // 九键布局撑满键盘区域（与全键盘横屏同款 50dp 边距）
             CompositionLocalProvider(
                 LocalKeyVisualPadding provides PaddingValues(
@@ -250,7 +287,7 @@ private fun T9KeyboardSwipeOverlay(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(vertical = 2.dp, horizontal = 50.dp),
+                        .padding(outerPadding),
                 ) {
                     T9KeyboardContent(
                         onKeyPress = onKeyPress,
@@ -284,7 +321,7 @@ private fun T9KeyboardSwipeOverlay(
                     modifier = Modifier
                         .fillMaxWidth()
                         .fillMaxHeight()
-                        .padding(start = 4.dp, end = 4.dp, bottom = 8.dp),
+                        .padding(outerPadding),
                 ) {
                     T9KeyboardContent(
                         onKeyPress = onKeyPress,
@@ -771,7 +808,7 @@ private fun T9KeyboardContent(
     Row(
         modifier = Modifier
             .fillMaxSize(),
-        horizontalArrangement = Arrangement.spacedBy(2.dp)
+        horizontalArrangement = Arrangement.spacedBy(T9_COLUMN_GAP_DP.dp)
     ) {
         // ── 第1列：左列（keyboard.t9.layout.left，candidates 为拼音候选面板占位） ──
         Column(

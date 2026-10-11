@@ -299,9 +299,14 @@ class KeyboardPanelConfigTest {
         val tablet = KeysConfigHelper.applyTabletKeyOverrides(keyConfig)
         assertEquals(4f to 6f, tablet.spacingFor("number"))
         assertEquals(4f to 6f, tablet.spacingFor("symbol"))
+        // 九键 / 笔画同样合并到设备档（平板键面内衬 4/6dp），与 26 键、面板同一档
+        assertEquals(4f to 6f, tablet.spacingFor("t9"))
+        assertEquals(4f to 6f, tablet.spacingFor("stroke"))
         // 手机档：仍是各面板原有间距
         assertEquals(2f to 2f, keyConfig.spacingFor("number"))
         assertEquals(2f to 4f, keyConfig.spacingFor("symbol"))
+        assertEquals(2f to 2f, keyConfig.spacingFor("t9"))
+        assertEquals(2f to 2f, keyConfig.spacingFor("stroke"))
     }
 
     @Test

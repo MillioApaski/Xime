@@ -206,18 +206,35 @@ fun PanelKeyboardLayout(
     }
 }
 
+/** 键盘区两侧外围留白（dp）：手机 4、平板 16（键面距屏幕边 20dp，与平板 26 键同档）。 */
+internal const val PHONE_KEYBOARD_SIDE_PADDING_DP = 4
+internal const val TABLET_KEYBOARD_SIDE_PADDING_DP = 16
+
+/** 键盘区两侧外围留白（dp，竖屏口径）：面板 / 九键 / 笔画 / 手写共用档位。 */
+internal fun keyboardSidePaddingDp(isTablet: Boolean): Float =
+    if (isTablet) TABLET_KEYBOARD_SIDE_PADDING_DP.toFloat() else PHONE_KEYBOARD_SIDE_PADDING_DP.toFloat()
+
 /**
- * 面板外围留白：与九键拼音键盘（`T9KeyboardLayout`）对齐——竖屏 4dp 两侧 + 8dp 底部，
- * 横屏 2dp 上下 + 50dp 左右（同九键横屏）。
+ * 键盘区外围留白档：**面板（数字 / 常用符号 / 全量符号）与九键、笔画、手写键盘共用**
+ * （后三者原来各写各的 4dp/50dp，平板上与 26 键/面板不一致，现全部收敛到这一条）。
  *
- * 平板设备档另外统一到 26 键的口径：两侧 16dp + 键面内衬 4/6dp（见
- * `keyboard.key.<段>_tablet.spacing_x/y`）⇒ 键面距屏幕边 20dp、相邻键面横 8dp / 竖 12dp，
- * 与平板 26 键完全同档。
+ * - 手机竖屏：两侧 4dp + 底部 8dp；
+ * - 手机横屏：上下 2dp + 左右 50dp（拇指缩进，键矮场景）；
+ * - 平板：两侧 16dp + 底部 8dp，与 26 键同档（键面距屏幕边 20dp；配合 `keyboard.key.<名>_tablet`
+ *   的 4/6dp 键面内衬 ⇒ 相邻键面横 8dp / 竖 12dp）。
  */
 internal fun panelOuterPadding(isLandscape: Boolean, isTablet: Boolean): PaddingValues = when {
-    isTablet -> PaddingValues(start = 16.dp, end = 16.dp, bottom = 8.dp)
+    isTablet -> PaddingValues(
+        start = TABLET_KEYBOARD_SIDE_PADDING_DP.dp,
+        end = TABLET_KEYBOARD_SIDE_PADDING_DP.dp,
+        bottom = 8.dp,
+    )
     isLandscape -> PaddingValues(horizontal = 50.dp, vertical = 2.dp)
-    else -> PaddingValues(start = 4.dp, end = 4.dp, bottom = 8.dp)
+    else -> PaddingValues(
+        start = PHONE_KEYBOARD_SIDE_PADDING_DP.dp,
+        end = PHONE_KEYBOARD_SIDE_PADDING_DP.dp,
+        bottom = 8.dp,
+    )
 }
 
 /** 进入位置记忆：backKeyOnLeft=false 时交换左列末键与中列末行首键（返回键位置对齐进入的键盘）。 */

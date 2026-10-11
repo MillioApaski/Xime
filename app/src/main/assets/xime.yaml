@@ -408,7 +408,8 @@ keyboard:
   # corner_radius:      按键圆角半径（dp，默认 8），独立于 shadow.shape_radius
   # spacing_x:          按键横向间距（dp，默认 2），未设置时各键盘使用自身默认值
   # spacing_y:          按键竖向间距（dp，默认 4.25；横屏默认 2），未设置时各键盘使用自身默认值
-  # 各键盘可单独覆盖圆角与间距（可选），键盘名：qwerty / t9 / number / stroke / symbol；
+  # 各键盘可单独覆盖圆角与间距（可选），键盘名：qwerty / t9 / number / stroke / symbol
+  # （handwriting 手写键盘的键面尺寸写在代码里，圆角同样认 handwriting 这个名字）；
   # 平板设备档另可写 <键盘名>_tablet（平板上覆盖同名基础覆盖，见下方示例）。
   # 例如：t9: { corner_radius: 8, spacing_x: 1, spacing_y: 2 }
   key:
@@ -420,10 +421,13 @@ keyboard:
     stroke: { spacing_x: 2, spacing_y: 2 }
     symbol: { spacing_x: 2, spacing_y: 4 }
     # 平板设备档：面板与平板 26 键同档——键面内衬 4/6dp（相邻键面横 8dp / 竖 12dp），
-    # 配合面板两侧 16dp 外围留白，键面距屏幕边同为 20dp（手机不受影响）。
-    # 圆角：这里没写覆盖时按设备档——平板所有键盘（26 键与数字/常用符号面板）统一用大键面档
-    # （不小于 14dp），手机用上面的全局 corner_radius；要单独调就写键盘名，例如
+    # 配合键盘区两侧 16dp 外围留白，键面距屏幕边同为 20dp（手机不受影响）。
+    # 圆角：这里没写覆盖时按设备档——平板所有键盘（26 键 / 数字 · 常用符号面板 / 九键 / 笔画 /
+    # 手写）统一用大键面档（不小于 14dp），手机用上面的全局 corner_radius；
+    # 要单独调就写键盘名，例如
     #   qwerty_tablet: { corner_radius: 12 } / symbol: { corner_radius: 10 }
+    t9_tablet: { spacing_x: 4, spacing_y: 6 }
+    stroke_tablet: { spacing_x: 4, spacing_y: 6 }
     number_tablet: { spacing_x: 4, spacing_y: 6 }
     symbol_tablet: { spacing_x: 4, spacing_y: 6 }
 
