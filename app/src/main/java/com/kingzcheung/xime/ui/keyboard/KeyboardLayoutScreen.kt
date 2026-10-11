@@ -1,12 +1,12 @@
 package com.kingzcheung.xime.ui.keyboard
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -16,6 +16,7 @@ import com.kingzcheung.xime.handwriting.HandwritingCandidate
 import com.kingzcheung.xime.rime.T9InputController
 import com.kingzcheung.xime.service.CandidateState
 import com.kingzcheung.xime.settings.KeysConfigHelper
+import com.kingzcheung.xime.ui.isTablet
 import com.kingzcheung.xime.ui.theme.KeyboardThemes
 import com.kingzcheung.xime.ui.theme.resolveSolidColor
 import com.kingzcheung.xime.util.FileLogger
@@ -38,9 +39,11 @@ fun KeyboardLayoutScreen(
     t9Controller: T9InputController? = null,
     candidateState: State<CandidateState> = remember { mutableStateOf(CandidateState()) },
 ) {
-    var lastLoggedKb by remember { mutableStateOf<KeyboardLayoutState?>(null) }
-    if (keyboardState != lastLoggedKb) {
-        lastLoggedKb = keyboardState
+    // 键盘切换日志：必须放 LaunchedEffect。原实现是「组合期读写同一个 remember 状态」
+    // （if (keyboardState != lastLoggedKb) { lastLoggedKb = keyboardState; ... }）——
+    // 读让本函数订阅了该状态，写又在组合期发生 ⇒ 每次 keyboardState 变化都把自己标脏，
+    // 整棵键盘树（面板 40+ 键）要多重组一遍，这就是 ?123 切换的「延迟感」来源之一。
+    LaunchedEffect(keyboardState, uiState.isAsciiMode) {
         FileLogger.d("XimeKeyboard", "render keyboard: $keyboardState, ui ascii=${uiState.isAsciiMode}")
     }
     val kbColors = KeysConfigHelper.getKeyboardColors()
@@ -68,6 +71,13 @@ fun KeyboardLayoutScreen(
     val kbShadow = KeysConfigHelper.getKeyboardShadow()
     val kbKey = KeysConfigHelper.getKeyboardKeyConfig()
     val accentColor = KeyboardThemes.getAccentColor(uiState.themeId, uiState.isDarkTheme)
+
+    // 代码布局（九键 / 笔画 / 手写）的键面圆角与阴影圆角同样走「yaml 按键盘覆盖 → 设备档」，
+    // 与 26 键 / 面板共用同一条解析：平板统一 14dp（此前这三处漏了设备档，仍是全局 8dp/硬编码 6dp）。
+    val tablet = isTablet()
+    val t9CornerRadius = keyCornerRadiusFor(kbKey, "t9", tablet)
+    val strokeCornerRadius = keyCornerRadiusFor(kbKey, "stroke", tablet)
+    val handwritingCornerRadius = keyCornerRadiusFor(kbKey, "handwriting", tablet)
 
 
     val onGestureAction: (GestureAction, String) -> Unit = { action, value ->
@@ -105,7 +115,8 @@ fun KeyboardLayoutScreen(
                         keyboardBgColor = keyboardBgColor,
                         shadowEnabled = kbShadow.enabled,
                         shadowElevation = kbShadow.elevation.dp,
-                        shadowShapeRadius = kbShadow.shapeRadius.dp,
+                        shadowShapeRadius = maxOf(kbShadow.shapeRadius.dp, handwritingCornerRadius),
+                        keyCornerRadius = handwritingCornerRadius,
                         onKeyPress = onKeyPress,
                         onButtonFeedback = onHandwritingButtonFeedback,
                         onCandidates = onHandwritingCandidates,
@@ -135,7 +146,8 @@ fun KeyboardLayoutScreen(
                         keyboardBgColor = keyboardBgColor,
                         shadowEnabled = kbShadow.enabled,
                         shadowElevation = kbShadow.elevation.dp,
-                        shadowShapeRadius = kbShadow.shapeRadius.dp,
+                        shadowShapeRadius = maxOf(kbShadow.shapeRadius.dp, handwritingCornerRadius),
+                        keyCornerRadius = handwritingCornerRadius,
                         onKeyPress = onKeyPress,
                         onButtonFeedback = onHandwritingButtonFeedback,
                         onCandidates = onHandwritingCandidates,
@@ -160,8 +172,13 @@ fun KeyboardLayoutScreen(
                 // 从全键盘（?123 在左下角）进入数字键盘时，返回键放到左下角与进入位置对齐；
                 // 九键/笔画/手写进入时保持「符号键在最左下角」的九键习惯
                 val lastMainLayout by viewModel.lastMainLayout.collectAsStateWithLifecycle()
-                NumberKeyboardLayout(
+                PanelKeyboardLayout(
+                    section = "number",
                     onKeyPress = onKeyPress,
+                    viewModel = viewModel,
+                    callbacks = callbacks,
+                    uiState = uiState,
+                    isAsciiMode = uiState.isAsciiMode,
                     keyBackgroundColor = keyBgColor,
                     keyTextColor = keyTextColor,
                     specialKeyBackgroundColor = specialKeyBgColor,
@@ -169,8 +186,8 @@ fun KeyboardLayoutScreen(
                     keyboardBackgroundColor = keyboardBgColor,
                     shadowEnabled = kbShadow.enabled,
                     shadowElevation = kbShadow.elevation.dp,
-                    shadowShapeRadius = kbShadow.shapeRadius.dp,
-                    keyCornerRadius = kbKey.cornerRadius.dp,
+                    shadowShapeRadius = maxOf(kbShadow.shapeRadius.dp, keyCornerRadiusFor(kbKey, "number", isTablet())),
+                    keyCornerRadius = keyCornerRadiusFor(kbKey, "number", isTablet()),
                     keySpacingX = kbKey.spacingFor("number").first?.dp,
                     keySpacingY = kbKey.spacingFor("number").second?.dp,
                     modifier = modifier,
@@ -183,8 +200,12 @@ fun KeyboardLayoutScreen(
             }
 
             is KeyboardLayoutState.CommonSymbol -> {
-                CommonSymbolKeyboardLayout(
+                PanelKeyboardLayout(
+                    section = "common_symbols",
                     onKeyPress = onKeyPress,
+                    viewModel = viewModel,
+                    callbacks = callbacks,
+                    uiState = uiState,
                     isAsciiMode = uiState.isAsciiMode,
                     keyBackgroundColor = keyBgColor,
                     keyTextColor = keyTextColor,
@@ -193,8 +214,8 @@ fun KeyboardLayoutScreen(
                     keyboardBackgroundColor = keyboardBgColor,
                     shadowEnabled = kbShadow.enabled,
                     shadowElevation = kbShadow.elevation.dp,
-                    shadowShapeRadius = kbShadow.shapeRadius.dp,
-                    keyCornerRadius = kbKey.cornerRadius.dp,
+                    shadowShapeRadius = maxOf(kbShadow.shapeRadius.dp, keyCornerRadiusFor(kbKey, "symbol", isTablet())),
+                    keyCornerRadius = keyCornerRadiusFor(kbKey, "symbol", isTablet()),
                     keySpacingX = kbKey.spacingFor("symbol").first?.dp,
                     keySpacingY = kbKey.spacingFor("symbol").second?.dp,
                     modifier = modifier,
@@ -214,10 +235,10 @@ fun KeyboardLayoutScreen(
                     keyboardBackgroundColor = keyboardBgColor,
                     shadowEnabled = kbShadow.enabled,
                     shadowElevation = kbShadow.elevation.dp,
-                    shadowShapeRadius = kbShadow.shapeRadius.dp,
-                    keyCornerRadius = kbKey.cornerRadius.dp,
-                    keySpacingX = kbKey.spacingFor("stroke").first?.dp,
-                    keySpacingY = kbKey.spacingFor("stroke").second?.dp,
+                    shadowShapeRadius = maxOf(kbShadow.shapeRadius.dp, strokeCornerRadius),
+                    keyCornerRadius = strokeCornerRadius,
+                    keySpacingX = kbKey.spacingFor("stroke").first?.dp ?: if (tablet) 4.dp else null,
+                    keySpacingY = kbKey.spacingFor("stroke").second?.dp ?: if (tablet) 6.dp else null,
                     modifier = modifier,
                     onKeyPressDown = callbacks.onKeyPressDown,
                     isFloatingMode = uiState.isFloatingMode,
@@ -235,7 +256,8 @@ fun KeyboardLayoutScreen(
                         keyboardBgColor = keyboardBgColor,
                         shadowEnabled = kbShadow.enabled,
                         shadowElevation = kbShadow.elevation.dp,
-                        shadowShapeRadius = kbShadow.shapeRadius.dp,
+                        shadowShapeRadius = maxOf(kbShadow.shapeRadius.dp, handwritingCornerRadius),
+                        keyCornerRadius = handwritingCornerRadius,
                         onKeyPress = onKeyPress,
                         onButtonFeedback = onHandwritingButtonFeedback,
                         onCandidates = onHandwritingCandidates,
@@ -259,10 +281,10 @@ fun KeyboardLayoutScreen(
                         keyboardBackgroundColor = keyboardBgColor,
                         shadowEnabled = kbShadow.enabled,
                         shadowElevation = kbShadow.elevation.dp,
-                        shadowShapeRadius = kbShadow.shapeRadius.dp,
-                        keyCornerRadius = kbKey.cornerRadius.dp,
-                        keySpacingX = kbKey.spacingFor("t9").first?.dp,
-                        keySpacingY = kbKey.spacingFor("t9").second?.dp,
+                        shadowShapeRadius = maxOf(kbShadow.shapeRadius.dp, t9CornerRadius),
+                        keyCornerRadius = t9CornerRadius,
+                        keySpacingX = kbKey.spacingFor("t9").first?.dp ?: if (tablet) 4.dp else null,
+                        keySpacingY = kbKey.spacingFor("t9").second?.dp ?: if (tablet) 6.dp else null,
                         modifier = modifier,
                         onKeyPressDown = callbacks.onKeyPressDown,
                         isFloatingMode = uiState.isFloatingMode,

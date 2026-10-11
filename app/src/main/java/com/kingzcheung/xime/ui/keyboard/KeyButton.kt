@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
@@ -72,6 +73,11 @@ val LocalKeyVisualPadding = staticCompositionLocalOf {
 /** 上滑/下滑提示改画键面角标（上滑=右上角、下滑=底部）。
  *  手机横屏键矮，提示按默认方式画在主字符上下方（offset ±hintOffset）会被键盘顶部裁掉。 */
 val LocalSwipeHintCorner = staticCompositionLocalOf { false }
+
+/** 键面提示放大系数：1f=手机；平板为 1.35f（键盘根层提供）。驱动上滑提示字号/加深/
+ *  角标内边距、字母加粗与 tap 气泡缺省。键组件统一读取本 Local，布局自由自定义时
+ *  任何键（字母/退格/空格等）的提示样式都随设备档一致变化。 */
+val LocalHintExtraScale = staticCompositionLocalOf { 1f }
 
 /** 按键圆角半径，由各布局在根层通过 CompositionLocalProvider 提供。
  *  独立于 shadow.shape_radius，为统一配置化而设。 */
@@ -795,7 +801,10 @@ fun SwipeableKeyButton(
         val contentScale = adaptiveKeyContentScale(maxHeight.value)
         val hintScale = adaptiveHintScale(contentScale)
         val hintOffset = adaptiveHintOffsetDp(contentScale).dp
-        val effectiveSwipeFontSize = (swipeFontSize.value * hintScale).sp
+        val hintExtraScale = LocalHintExtraScale.current
+        val effectiveSwipeFontSize = (swipeFontSize.value * hintScale * hintExtraScale).sp
+        // 平板大键（hintExtraScale > 1）时上标同步加深，对齐 Gboard 数字上标的醒目程度
+        val hintAlpha = if (hintExtraScale > 1f) 0.72f else 0.5f
 
         if (layoutMode == ButtonLayout.COMPACT) {
             Box(modifier = Modifier.fillMaxSize()) {
@@ -890,7 +899,8 @@ fun SwipeableKeyButton(
                         text = text,
                         color = textColor,
                         fontSize = ((if (fontSize != androidx.compose.ui.unit.TextUnit.Unspecified) fontSize.value else if (text.length > 2) 14f else 18f) * contentScale).sp,
-                        fontWeight = if (text.length > 2) FontWeight.Medium else FontWeight.Normal,
+                        // 平板大键（hintExtraScale > 1）单字母也用 Medium，避免大键面上 Normal 显细
+                        fontWeight = if (text.length > 2 || hintExtraScale > 1f) FontWeight.Medium else FontWeight.Normal,
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         fontFamily = keyFontFamily
@@ -942,7 +952,7 @@ fun SwipeableKeyButton(
                     else if (keyLabel.length <= 4) keyLabel else keyLabel.take(4)
                 Text(
                     text = displayText,
-                    color = textColor.copy(alpha = 0.6f),
+                    color = textColor.copy(alpha = if (hintExtraScale > 1f) hintAlpha else 0.6f),
                     fontSize = effectiveSwipeFontSize,
                     fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center,
@@ -952,7 +962,11 @@ fun SwipeableKeyButton(
                     lineHeight = if (swipeHintCorner && hintLineCount == 1) 1.sp else androidx.compose.ui.unit.TextUnit.Unspecified,
                     modifier = if (swipeHintCorner) Modifier
                         .align(Alignment.TopEnd)
-                        .padding(top = 2.dp, end = 4.dp)
+                        // 平板大键上标离角更远（贴角顶点太局促），手机横屏维持紧凑 2/4dp
+                        .padding(
+                            top = if (hintExtraScale > 1f) 5.dp else 2.dp,
+                            end = if (hintExtraScale > 1f) 10.dp else 4.dp,
+                        )
                     else Modifier.offset(y = -hintOffset),
                     fontFamily = keyLabelFontFamily
                 )
@@ -1493,19 +1507,425 @@ fun SwipeableIconKeyButton(
         if (!swipeText.isNullOrEmpty()) {
             // 键矮场景（LocalSwipeHintCorner，手机横屏）：提示画右上角，避免 offset 提示被键盘顶部裁掉
             val hintCorner = LocalSwipeHintCorner.current
+            // 平板（LocalHintExtraScale > 1）提示加大加深、离角更远，与字母键上标同规则
+            val hintExtraScale = LocalHintExtraScale.current
             Text(
                 text = swipeText,
-                color = iconColor.copy(alpha = 0.5f),
-                fontSize = 9.sp,
+                color = iconColor.copy(alpha = if (hintExtraScale > 1f) 0.72f else 0.5f),
+                fontSize = (9f * hintExtraScale).sp,
                 fontWeight = FontWeight.Normal,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 lineHeight = if (hintCorner) 1.sp else androidx.compose.ui.unit.TextUnit.Unspecified,
                 modifier = if (hintCorner) Modifier
                     .align(Alignment.TopEnd)
-                    .padding(top = 2.dp, end = 4.dp)
+                    .padding(
+                        top = if (hintExtraScale > 1f) 5.dp else 2.dp,
+                        end = if (hintExtraScale > 1f) 10.dp else 4.dp,
+                    )
                 else Modifier.offset(y = (-14).dp),
                 fontFamily = keyLabelFontFamily
+            )
+        }
+    }
+}
+
+/**
+ * 横屏紧凑版按键 — 主字符和上滑字符垂直堆叠居中
+ */
+@Composable
+fun SwipeableKeyButtonLandscape(
+    text: String,
+    onClick: () -> Unit,
+    backgroundColor: Color,
+    textColor: Color,
+    modifier: Modifier = Modifier,
+    /** 按下键帽气泡文本；null = 不弹按压气泡（键配置 `tap.bubble: false`）。缺省跟随键面文本。 */
+    pressText: String? = text,
+    swipeText: String? = null,
+    swipeDownText: String? = null,
+    swipeUpKeyLabel: String? = null,
+    swipeDownKeyLabel: String? = null,
+    onSwipe: ((String) -> Unit)? = null,
+    onSwipeDown: ((String) -> Unit)? = null,
+    /** 左/右滑动作；配置任一后该键横向滑动即接管，自动放弃父层光标手势。 */
+    onSwipeLeft: (() -> Unit)? = null,
+    onSwipeRight: (() -> Unit)? = null,
+    onPress: (() -> Unit)? = null,
+    onRelease: (() -> Unit)? = null,
+    onLongPressSelect: ((String) -> Unit)? = null,
+    longPressItems: List<String>? = null,
+    fontSize: androidx.compose.ui.unit.TextUnit = androidx.compose.ui.unit.TextUnit.Unspecified,
+    swipeFontSize: androidx.compose.ui.unit.TextUnit = 8.sp,
+    onSwipeStateChange: ((SwipeState, Rect) -> Unit)? = null,
+    shadowEnabled: Boolean = true,
+    shadowElevation: Dp = 1.dp,
+    shadowShapeRadius: Dp = 8.dp,
+) {
+    var isPressed by remember { mutableStateOf(false) }
+    var dragOffsetY by remember { mutableStateOf(0f) }
+    var dragOffsetX by remember { mutableStateOf(0f) }
+    var hasTriggeredSwipeUp by remember { mutableStateOf(false) }
+    var hasTriggeredSwipeDown by remember { mutableStateOf(false) }
+    var hasTriggeredSwipeLeft by remember { mutableStateOf(false) }
+    var hasTriggeredSwipeRight by remember { mutableStateOf(false) }
+    var isSwiping by remember { mutableStateOf(false) }
+    var isSwipeDown by remember { mutableStateOf(false) }
+    var buttonBounds by remember { mutableStateOf(Rect(0f, 0f, 0f, 0f)) }
+    var dragActivated by remember { mutableStateOf(false) }
+
+    val currentText by rememberUpdatedState(text)
+    val currentSwipeText by rememberUpdatedState(swipeText)
+    val currentSwipeDownText by rememberUpdatedState(swipeDownText)
+    val currentOnSwipe by rememberUpdatedState(onSwipe)
+    val currentOnSwipeDown by rememberUpdatedState(onSwipeDown)
+    val currentOnSwipeLeft by rememberUpdatedState(onSwipeLeft)
+    val currentOnSwipeRight by rememberUpdatedState(onSwipeRight)
+    val currentOnClick by rememberUpdatedState(onClick)
+    val currentOnPress by rememberUpdatedState(onPress)
+    val currentOnRelease by rememberUpdatedState(onRelease)
+    val currentOnLongPressSelect by rememberUpdatedState(onLongPressSelect)
+    val currentLongPressItems by rememberUpdatedState(longPressItems)
+    val currentOnSwipeStateChange by rememberUpdatedState(onSwipeStateChange)
+    val currentPressText by rememberUpdatedState(pressText)
+    val scope = rememberCoroutineScope()
+    val view = LocalView.current
+    val keyLabelFontFamily = AppFonts.keyLabelFontFamily
+    val keyFontFamily = AppFonts.keyFontFamily
+
+    val density = LocalDensity.current
+    val swipeUpThreshold = with(density) { (-15).dp.toPx() }
+    val swipeDownThreshold = with(density) { 15.dp.toPx() }
+    val swipeLeftThreshold = with(density) { (-30).dp.toPx() }
+    val swipeRightThreshold = with(density) { 30.dp.toPx() }
+    // 横向接管阈值：低于父层光标手势激活阈值（60dp），使配置了左右滑的键优先接管横向滑动
+    val horizontalSwipeSuppressThreshold = with(density) { 18.dp.toPx() }
+    val suppressCursorMove = LocalSuppressCursorMove.current
+    val bubbleShowThresholdUp = swipeUpThreshold * 0.3f
+    val bubbleShowThresholdDown = swipeDownThreshold * 0.3f
+
+    val shadowModifier = remember(shadowEnabled, shadowElevation, shadowShapeRadius, density, backgroundColor) {
+        if (shadowEnabled) {
+            val offsetPx = with(density) { shadowElevation.toPx() }
+            val cornerPx = with(density) { shadowShapeRadius.toPx() }
+            val color = crispShadowColor(backgroundColor)
+            Modifier.drawBehind {
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(0f, offsetPx),
+                    size = size,
+                    cornerRadius = CornerRadius(cornerPx)
+                )
+            }
+        } else Modifier
+    }
+    val keyCornerRadius = LocalKeyCornerRadius.current
+    val keyClipShape = remember(keyCornerRadius) { RoundedCornerShape(keyCornerRadius) }
+
+    fun darkenColor(color: Color, factor: Float = 0.15f): Color {
+        return Color(
+            red = (color.red * (1 - factor)).coerceIn(0f, 1f),
+            green = (color.green * (1 - factor)).coerceIn(0f, 1f),
+            blue = (color.blue * (1 - factor)).coerceIn(0f, 1f),
+            alpha = color.alpha
+        )
+    }
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxHeight()
+            .fillMaxWidth()
+            .pointerInput(currentText, currentLongPressItems.isNullOrEmpty(), currentOnLongPressSelect != null) {
+                if (currentLongPressItems.isNullOrEmpty() || currentOnLongPressSelect == null) {
+                    detectTapGestures(
+                        onPress = {
+                            isPressed = true
+                            currentOnSwipeStateChange?.invoke(SwipeState(isPressed = true, pressedText = currentPressText), buttonBounds)
+                            currentOnPress?.invoke()
+                            tryAwaitRelease()
+                            isPressed = false
+                            currentOnRelease?.invoke()
+                            currentOnSwipeStateChange?.invoke(SwipeState(), buttonBounds)
+                        },
+                        onTap = {
+                            if (!dragActivated && !hasTriggeredSwipeUp && !hasTriggeredSwipeDown) currentOnClick()
+                        }
+                    )
+                } else {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        isPressed = true
+                        var localLongPressTriggered = false
+                        var selectedIdx = 0
+                        val downX = down.position.x
+                        val items = currentLongPressItems ?: return@awaitEachGesture
+
+                        currentOnSwipeStateChange?.invoke(SwipeState(isPressed = true, pressedText = currentPressText), buttonBounds)
+                        currentOnPress?.invoke()
+
+                        val longPressJob = scope.launch {
+                            delay(400L)
+                            localLongPressTriggered = true
+                            view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                            currentOnSwipeStateChange?.invoke(
+                                SwipeState(
+                                    isPressed = true,
+                                    isLongPress = true,
+                                    longPressItems = items,
+                                    selectedLongPressIndex = 0
+                                ),
+                                buttonBounds
+                            )
+                        }
+
+                        val cancelThresholdPx = with(density) { 5.dp.toPx() }
+                        val downY = down.position.y
+                        var swipeDetected = false
+
+                        try {
+                            var lastReportedIdx = -1
+                            var completed = false
+                            while (!completed) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
+
+                                if (change.isConsumed) continue
+
+                                if (!localLongPressTriggered) {
+                                    val deltaX = change.position.x - downX
+                                    val deltaY = change.position.y - downY
+                                    if (kotlin.math.abs(deltaX) > cancelThresholdPx || kotlin.math.abs(deltaY) > cancelThresholdPx) {
+                                        swipeDetected = true
+                                        longPressJob.cancel()
+                                    }
+                                }
+
+                                if (localLongPressTriggered) {
+                                    val deltaX = change.position.x - downX
+                                    val itemWidth = buttonBounds.width / items.size
+                                    selectedIdx = ((deltaX / itemWidth) + if (items.size > 1) 0.5f else 0f).toInt()
+                                        .coerceIn(0, items.size - 1)
+
+                                    if (selectedIdx != lastReportedIdx) {
+                                        lastReportedIdx = selectedIdx
+                                        currentOnSwipeStateChange?.invoke(
+                                            SwipeState(
+                                                isPressed = true,
+                                                isLongPress = true,
+                                                longPressItems = items,
+                                                selectedLongPressIndex = selectedIdx
+                                            ),
+                                            buttonBounds
+                                        )
+                                    }
+                                    change.consume()
+                                }
+
+                                if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Release) {
+                                    completed = true
+                                    if (localLongPressTriggered) {
+                                        val selected = items.getOrNull(selectedIdx)
+                                        if (selected != null) {
+                                            currentOnLongPressSelect?.invoke(selected)
+                                        }
+                                    } else if (!dragActivated) {
+                                        // 不能用 swipeDetected 抑制点击：swipeDetected 由 5dp 位移触发，
+                                        // 而 dragActivated 由 touch slop（更大）触发。5dp~touchSlop 区间
+                                        // 若被 swipeDetected 吞掉点击且 drag 未激活，会造成快速打字漏键。
+                                        // 5dp 位移只用于取消长按（longPressJob）。
+                                        currentOnClick()
+                                    }
+                                }
+                            }
+                        } finally {
+                            longPressJob.cancel()
+                            isPressed = false
+                            currentOnRelease?.invoke()
+                            currentOnSwipeStateChange?.invoke(SwipeState(), buttonBounds)
+                        }
+                    }
+                }
+            }
+            .then(
+                if (swipeText != null || swipeDownText != null ||
+                    onSwipeLeft != null || onSwipeRight != null
+                ) {
+                    Modifier.pointerInput(Unit) {
+                        detectDragGestures(
+                            onDragStart = {
+                                dragActivated = true
+                                isPressed = true
+                                dragOffsetY = 0f
+                                dragOffsetX = 0f
+                                hasTriggeredSwipeUp = false
+                                hasTriggeredSwipeDown = false
+                                hasTriggeredSwipeLeft = false
+                                hasTriggeredSwipeRight = false
+                                isSwiping = false
+                                isSwipeDown = false
+                                currentOnSwipeStateChange?.invoke(SwipeState(isPressed = true, pressedText = currentPressText), buttonBounds)
+                            },
+                            onDragEnd = {
+                                if (!hasTriggeredSwipeUp && !hasTriggeredSwipeDown &&
+                                    !hasTriggeredSwipeLeft && !hasTriggeredSwipeRight &&
+                                    dragOffsetY > swipeUpThreshold && dragOffsetY < swipeDownThreshold) {
+                                    onClick()
+                                }
+                                dragActivated = false
+                                isPressed = false
+                                dragOffsetY = 0f
+                                dragOffsetX = 0f
+                                hasTriggeredSwipeUp = false
+                                hasTriggeredSwipeDown = false
+                                hasTriggeredSwipeLeft = false
+                                hasTriggeredSwipeRight = false
+                                isSwiping = false
+                                isSwipeDown = false
+                                currentOnSwipeStateChange?.invoke(SwipeState(), buttonBounds)
+                            },
+                            onDragCancel = {
+                                dragActivated = false
+                                isPressed = false
+                                dragOffsetY = 0f
+                                dragOffsetX = 0f
+                                hasTriggeredSwipeUp = false
+                                hasTriggeredSwipeDown = false
+                                hasTriggeredSwipeLeft = false
+                                hasTriggeredSwipeRight = false
+                                isSwiping = false
+                                isSwipeDown = false
+                                currentOnSwipeStateChange?.invoke(SwipeState(), buttonBounds)
+                            },
+                            onDrag = { _: androidx.compose.ui.input.pointer.PointerInputChange, dragAmount: Offset ->
+                                dragOffsetX += dragAmount.x
+                                dragOffsetY += dragAmount.y
+
+                                val swipeTextValue = currentSwipeText
+                                val swipeDownTextValue = currentSwipeDownText
+                                val onSwipeAction = currentOnSwipe
+                                val onSwipeDownAction = currentOnSwipeDown
+                                val onSwipeLeftAction = currentOnSwipeLeft
+                                val onSwipeRightAction = currentOnSwipeRight
+                                val onSwipeStateChangeAction = currentOnSwipeStateChange
+
+                                // 配置了左/右滑的键：横向滑动即接管，抑制父层光标手势
+                                if (shouldSuppressCursorMove(
+                                        onSwipeLeftAction != null || onSwipeRightAction != null,
+                                        dragOffsetX, dragOffsetY, horizontalSwipeSuppressThreshold
+                                    )
+                                ) {
+                                    suppressCursorMove.value = true
+                                }
+                                if (dragOffsetX < swipeLeftThreshold && !hasTriggeredSwipeLeft && onSwipeLeftAction != null) {
+                                    hasTriggeredSwipeLeft = true
+                                    onSwipeLeftAction()
+                                }
+                                if (dragOffsetX > swipeRightThreshold && !hasTriggeredSwipeRight && onSwipeRightAction != null) {
+                                    hasTriggeredSwipeRight = true
+                                    onSwipeRightAction()
+                                }
+
+                                if (dragOffsetY < 0) {
+                                    val shouldShowBubble = swipeTextValue != null && dragOffsetY < bubbleShowThresholdUp
+                                    if (shouldShowBubble != isSwiping) {
+                                        isSwiping = shouldShowBubble
+                                        isSwipeDown = false
+                                        onSwipeStateChangeAction?.invoke(
+                                            SwipeState(isSwiping = shouldShowBubble, swipeText = swipeTextValue, isSwipeDown = false),
+                                            buttonBounds
+                                        )
+                                    }
+                                } else if (dragOffsetY > 0) {
+                                    val shouldShowBubble = swipeDownTextValue != null && dragOffsetY > bubbleShowThresholdDown
+                                    if (shouldShowBubble != isSwipeDown) {
+                                        isSwipeDown = shouldShowBubble
+                                        isSwiping = shouldShowBubble
+                                        onSwipeStateChangeAction?.invoke(
+                                            SwipeState(isSwiping = shouldShowBubble, swipeText = swipeDownTextValue, isSwipeDown = true),
+                                            buttonBounds
+                                        )
+                                    }
+                                }
+
+                                if (dragOffsetY < 0 && !hasTriggeredSwipeUp && swipeTextValue != null && onSwipeAction != null) {
+                                    if (dragOffsetY < swipeUpThreshold) {
+                                        hasTriggeredSwipeUp = true
+                                        onSwipeAction(swipeTextValue)
+                                    }
+                                } else if (dragOffsetY > 0 && !hasTriggeredSwipeDown && swipeDownTextValue != null && onSwipeDownAction != null) {
+                                    if (dragOffsetY > swipeDownThreshold) {
+                                        hasTriggeredSwipeDown = true
+                                        onSwipeDownAction(swipeDownTextValue)
+                                    }
+                                }
+                            }
+                        )
+                    }
+                } else Modifier
+            )
+            .onGloballyPositioned { coordinates ->
+                buttonBounds = coordinates.boundsInRoot()
+            }
+            .padding(LocalKeyVisualPadding.current)
+            .then(shadowModifier)
+            .clip(keyClipShape)
+            .background(if (isPressed) darkenColor(backgroundColor) else backgroundColor),
+        contentAlignment = Alignment.TopStart
+    ) {
+        val contentScale = adaptiveKeyContentScale(
+            keyHeightDp = maxHeight.value,
+            referenceHeightDp = 44f,
+        )
+        val hintScale = adaptiveHintScale(contentScale)
+        val effectiveFontSize = (
+            if (fontSize != androidx.compose.ui.unit.TextUnit.Unspecified) fontSize.value else 14f
+        ) * contentScale
+        val effectiveSwipeFontSize = swipeFontSize.value * hintScale
+
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = text,
+                color = textColor,
+                fontSize = effectiveFontSize.sp,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                lineHeight = TextUnit.Unspecified,
+                fontFamily = keyFontFamily
+            )
+        }
+
+        val keyLabel = swipeUpKeyLabel ?: swipeText
+        if (keyLabel != null) {
+            Text(
+                text = keyLabel,
+                color = textColor.copy(alpha = 0.5f),
+                fontSize = effectiveSwipeFontSize.sp,
+                fontWeight = FontWeight.Normal,
+                textAlign = TextAlign.End,
+                maxLines = 1,
+                lineHeight = (8f * hintScale).sp,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 2.dp, end = 4.dp)
+            )
+        }
+        if (swipeDownKeyLabel != null) {
+            Text(
+                text = swipeDownKeyLabel,
+                color = textColor.copy(alpha = 0.5f),
+                fontSize = effectiveSwipeFontSize.sp,
+                fontWeight = FontWeight.Normal,
+                fontFamily = keyLabelFontFamily,
+                textAlign = TextAlign.Start,
+                maxLines = 1,
+                lineHeight = (8f * hintScale).sp,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(start = 4.dp, bottom = 2.dp)
             )
         }
     }

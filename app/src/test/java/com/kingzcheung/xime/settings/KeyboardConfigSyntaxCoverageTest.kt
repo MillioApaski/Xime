@@ -195,6 +195,97 @@ class KeyboardConfigSyntaxCoverageTest {
         assertNull(pair)
     }
 
+    // ═══ 1.5 平板设备档变体（<段>_tablet）═══
+
+    @Test
+    fun `平板且存在 tablet 段时整段替换基础段`() {
+        val default = """
+            keyboard:
+              qwerty:
+                keys:
+                  a: { tap: "a" }
+              qwerty_tablet:
+                keys:
+                  b: { tap: "b" }
+        """.trimIndent()
+        val pair = KeysConfigHelper.parseKeyboardGestureTexts(default, null, isTablet = true)
+        val zh = pair!!.first
+        assertNull("平板上不应残留基础段的键", zh["a"])
+        assertEquals(GestureAction.SEND_RIME, zh["b"]!!.tap!!.action)
+    }
+
+    @Test
+    fun `平板但无 tablet 段时保持基础段`() {
+        val default = """
+            keyboard:
+              qwerty:
+                keys:
+                  a: { tap: "a" }
+        """.trimIndent()
+        val pair = KeysConfigHelper.parseKeyboardGestureTexts(default, null, isTablet = true)
+        assertEquals(GestureAction.SEND_RIME, pair!!.first["a"]!!.tap!!.action)
+    }
+
+    @Test
+    fun `非平板不启用 tablet 段`() {
+        val default = """
+            keyboard:
+              qwerty:
+                keys:
+                  a: { tap: "a" }
+              qwerty_tablet:
+                keys:
+                  b: { tap: "b" }
+        """.trimIndent()
+        val pair = KeysConfigHelper.parseKeyboardGestureTexts(default, null, isTablet = false)
+        assertEquals(GestureAction.SEND_RIME, pair!!.first["a"]!!.tap!!.action)
+        assertNull(pair.first["b"])
+    }
+
+    @Test
+    fun `tablet 段只在自定义层定义时 default 层回退基础段`() {
+        val default = """
+            keyboard:
+              qwerty:
+                keys:
+                  a: { tap: "a" }
+        """.trimIndent()
+        val custom = """
+            keyboard:
+              qwerty_tablet:
+                keys:
+                  c: { tap: "c" }
+        """.trimIndent()
+        val pair = KeysConfigHelper.parseKeyboardGestureTexts(default, custom, isTablet = true)
+        val zh = pair!!.first
+        // default 层基础段键保留，custom 层 tablet 键按键级合并
+        assertEquals(GestureAction.SEND_RIME, zh["a"]!!.tap!!.action)
+        assertEquals(GestureAction.SEND_RIME, zh["c"]!!.tap!!.action)
+    }
+
+    @Test
+    fun `tablet 段行布局与按键布局同步变体`() {
+        val default = """
+            keyboard:
+              qwerty:
+                button_layout: compact
+                layout:
+                  rows:
+                    - [q, w, e]
+              qwerty_tablet:
+                button_layout: standard
+                layout:
+                  rows:
+                    - [q, w, e, r]
+        """.trimIndent()
+        val layout = KeysConfigHelper.parseKeyboardLayoutYamlText(default, "qwerty_tablet")
+        assertEquals(listOf(listOf("q", "w", "e", "r")), layout)
+        val (zhLayout, _) = KeysConfigHelper.parseButtonLayoutTexts(default, null, isTablet = true)
+        assertEquals(ButtonLayout.STANDARD, zhLayout)
+        val (zhLayoutPhone, _) = KeysConfigHelper.parseButtonLayoutTexts(default, null, isTablet = false)
+        assertEquals(ButtonLayout.COMPACT, zhLayoutPhone)
+    }
+
     // ═══ 2. button_layout（此前零覆盖）═══
 
     @Test
@@ -339,6 +430,11 @@ class KeyboardConfigSyntaxCoverageTest {
         // stroke/handwriting 可只有 schemas 无 keys，解析不抛即可
         KeysConfigHelper.parseKeyboardYamlSection(text, "stroke")
         KeysConfigHelper.parseKeyboardYamlSection(text, "handwriting")
+        // 面板段（数字/常用符号，布局 + 手势）解析不抛；段结构与键 id 契约见 KeyboardPanelConfigTest
+        for (section in KeysConfigHelper.PANEL_SECTIONS) {
+            assertNotNull("xime.yaml 缺少 $section layout", KeysConfigHelper.parsePanelLayoutYamlText(text, section))
+            KeysConfigHelper.parseKeyboardYamlSection(text, section)
+        }
         KeysConfigHelper.parseKeyboardActionsYamlText(text)
         val (zhLayout, enLayout) = KeysConfigHelper.parseButtonLayoutTexts(text, null)
         assertTrue(zhLayout in ButtonLayout.entries)

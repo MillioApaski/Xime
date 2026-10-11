@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kingzcheung.xime.ui.isTablet
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
@@ -217,7 +218,8 @@ fun CandidatePage(
         } else Modifier
     }
     // 左栏宽度：九键对齐其键盘左栏（宿主按同公式给的浮点 dp，不取整），其余布局用固定宽度
-    val railWidthModifier = if (state.leftRailWidthDp > 0f)
+    val hasT9Rail = state.leftRailWidthDp > 0f
+    val railWidthModifier = if (hasT9Rail)
         Modifier.fillMaxHeight().width(state.leftRailWidthDp.dp)
     else Modifier.fillMaxHeight().width(leftRailWidth)
 
@@ -251,12 +253,19 @@ fun CandidatePage(
                 .weight(1f)
                 // 垂直边距下放各栏：左栏用 leftRailInsetDp（九键对其键盘左栏面板的
                 // keySpacingY 缩进，切换展开/收起时左栏不跳位），中/右栏保持 6dp 原视觉。
-                // start 4dp 对齐九键键盘根容器的 start/end 4dp 边距（左右栏背景的
+                // start/end 4dp 对齐九键键盘根容器的 start/end 4dp 边距（左右栏背景的
                 // 边缘要与键盘态面板同起点，展开切换才不横移）；非九键布局由各栏
-                // 自行补足
+                // 自行补足。
+                // 九键左栏在位时改按键盘区外围留白档（手机 4dp / 平板 16dp，见
+                // [keyboardSidePaddingDp]）——平板九键键盘的两侧留白是 16dp，
+                // 展开页必须跟着走，否则左栏会比键盘态窄一截、展开/收起横移。
                 .padding(
-                    start = 4.dp,
-                    end = if (state.rightRailWidthDp > 0f) 4.dp else 8.dp
+                    start = if (hasT9Rail) keyboardSidePaddingDp(isTablet()).dp else 4.dp,
+                    end = when {
+                        hasT9Rail -> keyboardSidePaddingDp(isTablet()).dp
+                        state.rightRailWidthDp > 0f -> 4.dp
+                        else -> 8.dp
+                    }
                 )
         ) {
             // ── 左栏：九键为音节拼音候选（输入/选择态）或 side_symbols（空闲态，

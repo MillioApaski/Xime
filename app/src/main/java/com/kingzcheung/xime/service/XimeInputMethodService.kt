@@ -107,6 +107,7 @@ import com.kingzcheung.xime.ui.keyboard.isT9Schema
 import com.kingzcheung.xime.ui.keyboard.isHandwritingSchema
 import com.kingzcheung.xime.ui.theme.KeyboardThemes
 import com.kingzcheung.xime.ui.theme.keyboardBackground
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import com.kingzcheung.xime.settings.KeysConfigHelper
 import com.kingzcheung.xime.ui.theme.XimeTheme
@@ -1965,6 +1966,44 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     override fun sendKeyEvent(keyCode: Int) {
         currentInputConnection?.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
         currentInputConnection?.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
+    }
+
+    override fun moveCursor(direction: Int) {
+        if (direction == 0) return
+        if (candidateState.value.isComposing && !isT9Schema(uiState.value.currentSchemaId)) {
+            // 组合态（仅全键盘）：移动编码编辑光标。光标由宿主维护、仅是插入/删除
+            // 位置——librime caret 恒在编码末尾，候选始终针对整个编码转换；编辑操作
+            // （退格/字母）由路由层按此位置拦截处理。上屏（空闲态）后走下方编辑器光标逻辑
+            val input = rimeEngine.getInput()
+            if (input.isNotEmpty()) {
+                val base = if (editingCaretPos < 0) input.length else editingCaretPos
+                val target = (base + direction).coerceIn(0, input.length)
+                editingCaretPos = if (target >= input.length) -1 else target
+                // 编码快照供 displayCaretOffset 失同步自愈比对
+                editingCaretInput = if (editingCaretPos >= 0) input else ""
+                updateUI()
+            }
+        } else {
+            val ic = currentInputConnection ?: return
+            var movedBySelection = false
+            try {
+                val req = android.view.inputmethod.ExtractedTextRequest()
+                val extracted = ic.getExtractedText(req, 0)
+                if (extracted != null && extracted.selectionStart >= 0) {
+                    val newPos = (extracted.selectionStart + direction)
+                        .coerceIn(0, extracted.text?.length ?: 0)
+                    ic.setSelection(newPos, newPos)
+                    movedBySelection = true
+                }
+            } catch (_: Exception) {}
+            if (!movedBySelection) {
+                val keyCode = if (direction < 0) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT
+                repeat(abs(direction)) {
+                    ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
+                    ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
+                }
+            }
+        }
     }
 
     override fun executeCommand(name: String) {

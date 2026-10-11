@@ -109,6 +109,15 @@ object KeyActionRegistry {
         register("line_end", ActionDomain.SERVICE, GestureAction.LINE_END) { c, _ ->
             c.service.sendKeyEvent(KeyEvent.KEYCODE_MOVE_END)
         }
+        register("cursor_left", ActionDomain.SERVICE, GestureAction.CURSOR_LEFT) { c, _ ->
+            c.service.moveCursor(-1)
+        }
+        register("cursor_right", ActionDomain.SERVICE, GestureAction.CURSOR_RIGHT) { c, _ ->
+            c.service.moveCursor(1)
+        }
+        register("tab", ActionDomain.SERVICE, GestureAction.TAB) { c, _ ->
+            c.service.sendKeyEvent(KeyEvent.KEYCODE_TAB)
+        }
         register("undo", ActionDomain.SERVICE, GestureAction.UNDO) { c, _ ->
             c.service.performEditorMenuAction(android.R.id.undo)
         }
