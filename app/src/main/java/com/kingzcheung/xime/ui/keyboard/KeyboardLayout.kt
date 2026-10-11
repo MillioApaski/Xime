@@ -27,6 +27,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.KeyboardTab
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Language
@@ -147,7 +150,8 @@ fun KeyboardLayout(
     val kbKey = KeysConfigHelper.getKeyboardKeyConfig()
     val shadowEnabled = kbShadow.enabled
     val shadowElevation = kbShadow.elevation.dp
-    val shadowShapeRadius = kbShadow.shapeRadius.dp
+    // 平板参数档：阴影圆角不小于键圆角下限，否则键四角外露更方的阴影角（视觉"脏边"）
+    val shadowShapeRadius = if (isTablet()) maxOf(kbShadow.shapeRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbShadow.shapeRadius.dp
     val schemaName = uiState.schemaName
     val enterKeyText = uiState.enterKeyText
     val isDarkTheme = uiState.isDarkTheme
@@ -249,16 +253,25 @@ fun KeyboardLayout(
     val useLandscapeSplitKeyboard = isLandscape && landscapeSplitKeyboardEnabled
     // 手机横屏键盘矮，行距与分体紧凑档同源收紧；竖屏/平板保持常规行距
     val landscapeCompactSpacing = isLandscape && !isTablet()
+    // 平板参数档：大键面配更大的圆角与键间距（对齐 Gboard 平板观感），手机不受影响；
+    // 分体模式在平板上同样适用（分体只是行的排布方式，键面样式仍按设备档）
+    val tabletParams = isTablet()
 
     CompositionLocalProvider(
-        LocalKeyCornerRadius provides kbKey.cornerRadius.dp,
-        LocalSwipeHintCorner provides landscapeCompactSpacing,
+        LocalKeyCornerRadius provides if (tabletParams) maxOf(kbKey.cornerRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbKey.cornerRadius.dp,
+        // 平板与手机横屏一样走角标模式：上滑提示（数字上标）画右上角、与主字符拉开距离
+        LocalSwipeHintCorner provides (landscapeCompactSpacing || tabletParams),
+        // 平板键面提示统一放大（字母上标/退格"清空"等所有键组件一致），手机为 1f
+        LocalHintExtraScale provides (if (tabletParams) 1.35f else 1f),
         LocalKeyVisualPadding provides PaddingValues(
-            horizontal = kbKey.spacingFor("qwerty").first?.dp ?: 2.dp,
+            horizontal = if (tabletParams) 4.dp else (kbKey.spacingFor("qwerty").first?.dp ?: 2.dp),
             // 手机横屏：只认 qwerty 专属覆盖（keyboard.key.qwerty.spacing_y），回退 2.5dp；
-            // 其余场景：全局 qwerty 行距，回退 4.25dp
-            vertical = if (landscapeCompactSpacing) (kbKey.spacingOverrides["qwerty"]?.spacingY?.dp ?: 2.5.dp)
-            else (kbKey.spacingFor("qwerty").second?.dp ?: 4.25.dp),
+            // 其余场景：全局 qwerty 行距，回退 4.25dp；平板行距加大
+            vertical = when {
+                landscapeCompactSpacing -> (kbKey.spacingOverrides["qwerty"]?.spacingY?.dp ?: 2.5.dp)
+                tabletParams -> 6.dp
+                else -> (kbKey.spacingFor("qwerty").second?.dp ?: 4.25.dp)
+            },
         ),
     ) {
     Box(
@@ -288,7 +301,8 @@ fun KeyboardLayout(
                     modifier = Modifier
                         .fillMaxWidth()
                         .fillMaxHeight()
-                        .padding(start = 4.dp, end = 4.dp, bottom = 8.dp),
+                        // 平板键盘两侧留边（Gboard 式不满宽），手机维持贴边紧凑
+                        .padding(start = if (tabletParams) 16.dp else 4.dp, end = if (tabletParams) 16.dp else 4.dp, bottom = 8.dp),
             ) {
 
                 Column(
@@ -543,7 +557,7 @@ private class QwertyRowEnv(
 private fun functionKeyWidth(id: String, isAsciiMode: Boolean): Float {
     KeysConfigHelper.getKeyGesture(id, isAsciiMode)?.width?.takeIf { it > 0f }?.let { return it }
     return when (id) {
-        "shift", "delete" -> 1.4f
+        "shift", "delete", "shift_left", "shift_right", "caps" -> 1.4f
         "mode_change", "enter" -> 1.2f
         "earth", "comma" -> 0.8f
         "space" -> 3f
@@ -557,6 +571,9 @@ private fun letterKeyWidth(id: String, isAsciiMode: Boolean): Float =
 
 /** 键盘最大行数（支持 4 行标准布局，或 5 行带数字行）。 */
 internal const val MAX_QWERTY_ROWS = 5
+
+/** 平板键面圆角下限：键圆角与阴影圆角在平板上共同对齐此值，两处解析（主键盘/分体）共享。 */
+internal val TABLET_KEY_CORNER_RADIUS = 14.dp
 
 /** 标准 QWERTY 兜底行（3 字母行 + 控制行）。 */
 internal val DEFAULT_QWERTY_ROWS: List<List<String>> = listOf(
@@ -690,12 +707,16 @@ private fun QwertyRow(
  */
 internal val RENDERED_FUNCTION_KEY_IDS: Set<String> = setOf(
     "shift", "delete", "mode_change", "comma", "space", "earth", "enter", "symbol", "emoji", "voice",
+    "cursor_left", "cursor_right", "tab", "caps", "shift_left", "shift_right",
 )
 
 @Composable
 private fun FunctionKeyCell(id: String, env: QwertyRowEnv, modifier: Modifier) {
     when (id) {
         "shift" -> ShiftCell(env, modifier)
+        "caps" -> CapsCell(env, modifier)
+        "shift_left" -> ShiftCell(env, modifier, id = "shift_left")
+        "shift_right" -> ShiftCell(env, modifier, id = "shift_right")
         "delete" -> DeleteCell(env, modifier)
         "mode_change" -> ModeChangeCell(env, modifier)
         "comma" -> CommaCell(env, modifier)
@@ -711,6 +732,11 @@ private fun FunctionKeyCell(id: String, env: QwertyRowEnv, modifier: Modifier) {
         "voice" -> PanelActionCell(
             "voice", GestureAction.VOICE, "", rememberVectorPainter(Icons.Filled.Mic), env, modifier,
         )
+        "tab" -> PanelActionCell(
+            "tab", GestureAction.TAB, "", rememberVectorPainter(Icons.AutoMirrored.Filled.KeyboardTab), env, modifier,
+        )
+        "cursor_left" -> CursorMoveCell(-1, env, modifier)
+        "cursor_right" -> CursorMoveCell(1, env, modifier)
         else -> FileLogger.w("XimeKeyboard", "功能键 id \"$id\" 没有对应组件，该键不会显示：请改用受支持的 id")
     }
 }
@@ -748,10 +774,49 @@ private fun PanelActionCell(
         a11yDescription = when (id) {
             "symbol" -> "符号"
             "emoji" -> "表情"
-            else -> "语音输入"
+            "voice" -> "语音输入"
+            "tab" -> "Tab 键"
+            else -> null
         },
         onPress = { env.onKeyPressDown?.invoke(value) },
         onRelease = { env.onKeyRelease?.invoke(value) },
+        shadowEnabled = env.shadowEnabled,
+        shadowElevation = env.shadowElevation,
+        shadowShapeRadius = env.shadowShapeRadius,
+    )
+}
+
+/**
+ * 光标移动键（◀ / ▶，平板布局用）。
+ *
+ * 默认动作分别是光标左移/右移（组合态移编码编辑光标、空闲态移编辑器光标）；
+ * 可用 `keys.<id>.tap` 覆盖动作与图标（`icon: "@mic"` 等），与 [PanelActionCell] 同规则。
+ */
+@Composable
+private fun CursorMoveCell(direction: Int, env: QwertyRowEnv, modifier: Modifier) {
+    val id = if (direction < 0) "cursor_left" else "cursor_right"
+    val tap = KeysConfigHelper.getKeyGesture(id, env.isAsciiMode)?.tap
+    val action = tap?.action
+        ?: if (direction < 0) GestureAction.CURSOR_LEFT else GestureAction.CURSOR_RIGHT
+    val icon = tap?.icon?.takeIf { it.isNotEmpty() }?.let { panelKeyIcon(it) }
+        ?: rememberVectorPainter(
+            if (direction < 0) Icons.AutoMirrored.Filled.KeyboardArrowLeft
+            else Icons.AutoMirrored.Filled.KeyboardArrowRight
+        )
+    IconKeyButton(
+        icon = icon,
+        onClick = {
+            invokeKeyAction(
+                KeyAction(action = action, value = tap?.value ?: ""),
+                env.onKeyPress, env.onCommitText, env.onGestureAction,
+            )
+        },
+        backgroundColor = env.specialKeyBackgroundColor,
+        iconColor = env.specialKeyTextColor,
+        modifier = modifier,
+        a11yDescription = if (direction < 0) "光标左移" else "光标右移",
+        onPress = { env.onKeyPressDown?.invoke(id) },
+        onRelease = { env.onKeyRelease?.invoke(id) },
         shadowEnabled = env.shadowEnabled,
         shadowElevation = env.shadowElevation,
         shadowShapeRadius = env.shadowShapeRadius,
@@ -769,8 +834,8 @@ private fun panelKeyIcon(name: String): Painter? = when (name) {
 }
 
 @Composable
-private fun ShiftCell(env: QwertyRowEnv, modifier: Modifier) {
-    val shiftBinding = KeysConfigHelper.getKeyGesture("shift", env.isAsciiMode)
+private fun ShiftCell(env: QwertyRowEnv, modifier: Modifier, id: String = "shift") {
+    val shiftBinding = KeysConfigHelper.getKeyGesture(id, env.isAsciiMode)
     val shiftTap = shiftBinding?.tap
     val shiftDoubleTap = shiftBinding?.doubleTap
     val onTap: (() -> Unit)? = if (shiftTap != null && shiftTap.action != null && shiftTap.action != GestureAction.TOGGLE_SHIFT) {
@@ -812,6 +877,40 @@ private fun ShiftCell(env: QwertyRowEnv, modifier: Modifier) {
         onTap = onTap,
         onDoubleTap = onDoubleTap,
         onSwipe = onSwipe,
+    )
+}
+
+/**
+ * 大写锁定键（⇪，平板布局行 2 左端用）。
+ *
+ * 单击切换大写锁定（CAPS ↔ OFF，复用 shift_caps 路由语义），CAPS 态键面高亮；
+ * 可用 `keys.caps.tap` 覆盖动作。
+ */
+@Composable
+private fun CapsCell(env: QwertyRowEnv, modifier: Modifier) {
+    val capsBinding = KeysConfigHelper.getKeyGesture("caps", env.isAsciiMode)
+    val capsTap = capsBinding?.tap
+    val isCaps = env.shiftMode == ShiftMode.CAPS
+    IconKeyButton(
+        icon = rememberVectorPainter(Icons.TwoTone.KeyboardCapslock),
+        onClick = {
+            if (capsTap != null) {
+                invokeKeyAction(capsTap, env.onKeyPress, env.onCommitText, env.onGestureAction)
+            } else {
+                env.onKeyPress("shift_caps")
+            }
+        },
+        backgroundColor = env.specialKeyBackgroundColor,
+        iconColor = env.specialKeyTextColor,
+        modifier = modifier,
+        isHighlighted = isCaps,
+        a11yDescription = "大写锁定",
+        a11yState = if (isCaps) "已锁定" else "未锁定",
+        onPress = { env.onKeyPressDown?.invoke("shift_caps") },
+        onRelease = { env.onKeyRelease?.invoke("shift_caps") },
+        shadowEnabled = env.shadowEnabled,
+        shadowElevation = env.shadowElevation,
+        shadowShapeRadius = env.shadowShapeRadius,
     )
 }
 
@@ -1645,7 +1744,8 @@ private fun LandscapeKeyboardContent(
     val kbShadow = KeysConfigHelper.getKeyboardShadow()
     val shadowEnabled = kbShadow.enabled
     val shadowElevation = kbShadow.elevation.dp
-    val shadowShapeRadius = kbShadow.shapeRadius.dp
+    // 分体（平板）同样要求阴影圆角不小于键圆角下限，否则键四角外露更方的阴影角（视觉"脏边"）
+    val shadowShapeRadius = if (isTablet()) maxOf(kbShadow.shapeRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbShadow.shapeRadius.dp
     // 分体行拆分：行内容与竖屏同源（getKeyRows，含 xime.custom.yaml 自定义布局），
     // 未配置时回退内置 QWERTY（与竖屏 getOrElse 兜底一致）
     // 横屏与竖屏同源 layout.rows（最多 5 行）；纯字母布局在最后一个字母行两端补 shift/delete
@@ -1701,12 +1801,12 @@ private fun LandscapeKeyboardContent(
     )
 
     // 行距由外层 provider 统一提供（手机横屏回退 2dp / 平板 4.25dp），此处不再覆盖。
-    // 侧边距统一 4dp + 面板内距 4dp = 8dp 靠边，与候选栏一致；
+    // 侧边距统一 4dp + 面板内距 4dp = 8dp 靠边，与候选栏一致；平板分体两侧留边 16dp（同主键盘）
     // 挖孔/导航栏避让由服务层边衬区 padding 统一处理，不再叠加手机专用的 50dp 拇指区缩进。
     Row(
         modifier = Modifier
             .fillMaxSize()
-            .padding(vertical = 2.dp, horizontal = 4.dp)
+            .padding(vertical = 2.dp, horizontal = if (isTablet()) 16.dp else 4.dp)
     ) {
         Column(
             modifier = Modifier

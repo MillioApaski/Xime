@@ -39,6 +39,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
+import com.kingzcheung.xime.ui.isTablet
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -76,10 +77,12 @@ fun NumberKeyboardLayout(
     isFloatingMode: Boolean = false,
     specialKeyTextColor: Color = Color.White,
     backKeyOnLeft: Boolean = false,
+    /** 横屏时是否左右分体（跟随"分体键盘"设置）；关闭时横屏用整块布局 */
+    landscapeSplit: Boolean = false,
 ) {
 
     val configuration = LocalConfiguration.current
-    val isLandscape = !isFloatingMode && configuration.screenWidthDp > configuration.screenHeightDp
+    val isLandscape = !isFloatingMode && landscapeSplit && configuration.screenWidthDp > configuration.screenHeightDp
     val commonSymbols = listOf(
         "~", "!", "#", "$", "%", "^", "&", "?",
         "(", ")", "_", "=", "[", "]", "{", "}",
@@ -216,7 +219,8 @@ fun NumberKeyboardLayout(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight()
-                    .padding(start = 4.dp, end = 4.dp, bottom = 8.dp),
+                    // 平板两侧留边（与主键盘一致），手机维持 4dp
+                    .padding(start = if (isTablet()) 16.dp else 4.dp, end = if (isTablet()) 16.dp else 4.dp, bottom = 8.dp),
             ) {
                 NumberRows(
                     onKeyPress = onKeyPress,

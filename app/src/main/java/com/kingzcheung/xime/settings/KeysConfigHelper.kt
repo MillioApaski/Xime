@@ -13,6 +13,7 @@ import com.charleskorn.kaml.YamlNode
 import com.charleskorn.kaml.YamlScalar
 import com.kingzcheung.xime.BuildConfig
 import com.kingzcheung.xime.keyboard.GestureAction
+import com.kingzcheung.xime.ui.TABLET_SMALLEST_WIDTH_DP
 import androidx.compose.runtime.mutableStateOf
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -624,7 +625,8 @@ object KeysConfigHelper {
      * 布局行里出现这些 id 时，渲染层按 id 选择功能键组件而非字母键。
      */
     val FUNCTION_KEY_IDS: Set<String> = setOf(
-        "shift", "delete", "enter", "space", "mode_change", "symbol", "emoji", "earth", "voice", "comma"
+        "shift", "delete", "enter", "space", "mode_change", "symbol", "emoji", "earth", "voice", "comma",
+        "cursor_left", "cursor_right", "tab", "caps", "shift_left", "shift_right"
     )
 
     /**
@@ -640,7 +642,41 @@ object KeysConfigHelper {
     /** 九键左侧快捷符号栏内置默认值（T9KeyboardLayout 硬编码的历史行为）。 */
     val DEFAULT_T9_SIDE_SYMBOLS: List<String> = listOf("，", "。", "？", "！")
 
-    /** 笔画键盘左侧符号列内置默认（与历史硬编码一致）。 */
+    /**
+     * 当前设备是否为平板/大屏（smallestWidth ≥ 600dp，与 ui.isTablet() 的 sw600dp 档一致，
+     * 不随横竖屏变化）。KeysConfigHelper 无 Compose 上下文，用 resources 配置直接判定。
+     */
+    internal fun isTabletDevice(context: Context): Boolean =
+        context.resources.configuration.smallestScreenWidthDp >= TABLET_SMALLEST_WIDTH_DP
+
+    /** 判断 YAML 文本是否定义了 `keyboard.<section>` 段。 */
+    private fun hasKeyboardSection(yamlText: String, section: String): Boolean = try {
+        val root = yaml.parseToYamlNode(yamlText) as? YamlMap ?: return false
+        val keyboardNode = root.opt<YamlMap>("keyboard") ?: return false
+        keyboardNode.opt<YamlMap>(section) != null
+    } catch (_: Exception) {
+        false
+    }
+
+    /**
+     * 平板设备档变体段名解析：平板上若 yaml 定义了 `<section>_tablet` 段（内置或用户自定义
+     * 任一来源存在即可），QWERTY 全键盘整段改用平板变体；否则维持原段。
+     *
+     * 回退保证兼容：非平板不受影响；老用户自定义 yaml 没有 `_tablet` 段时也维持原行为；
+     * 平板上只写了基础段自定义（无 `_tablet`）则走内置平板默认段。
+     */
+    internal fun resolveQwertySection(
+        section: String,
+        defaultText: String,
+        customText: String?,
+        isTablet: Boolean,
+    ): String {
+        if (!isTablet) return section
+        val tabletSection = "${section}_tablet"
+        val hasTablet = hasKeyboardSection(defaultText, tabletSection) ||
+            (customText != null && hasKeyboardSection(customText, tabletSection))
+        return if (hasTablet) tabletSection else section
+    }    /** 笔画键盘左侧符号列内置默认（与历史硬编码一致）。 */
     val DEFAULT_STROKE_SIDE_SYMBOLS: List<String> = listOf("。", "？", "！", "~")
     
     private val yaml = Yaml(configuration = YamlConfiguration(strictMode = false))
@@ -1009,7 +1045,7 @@ object KeysConfigHelper {
         // 支持两种来源：files/rime/（浏览器导入）或 assets/（内置），自动 fallback
         val userData = readUserDataText(context, XIME_CUSTOM_CONFIG_FILE)
         val customText = userData ?: readAssetText(context, XIME_CUSTOM_CONFIG_FILE)
-        return parseKeyboardGestureTexts(defaultText, customText)
+        return parseKeyboardGestureTexts(defaultText, customText, isTabletDevice(context))
     }
 
     /**
@@ -1017,17 +1053,28 @@ object KeysConfigHelper {
      *
      * 预设合并为 default + custom（同名 custom 覆盖），合并结果供 custom keys 的
      * `{ use: }` 引用；keys 按键级合并（custom 同名键整体覆盖 default 键）。
+     *
+     * [isTablet] 时按设备档变体解析：yaml 存在 `<段>_tablet` 则整段改用平板变体
+     * （见 [resolveQwertySection]）。
      */
     internal fun parseKeyboardGestureTexts(
         defaultText: String,
         customText: String?,
+        isTablet: Boolean = false,
     ): Pair<Map<String, KeyBinding>, Map<String, KeyBinding>>? {
         val defaultPresets = parseKeyboardActionsYamlText(defaultText)
-        val defaultZh = parseKeyboardYamlSection(defaultText, "qwerty", defaultPresets) ?: return null
-        val defaultEn = parseKeyboardYamlSection(defaultText, "qwerty_en", defaultPresets) ?: emptyMap()
         val presets = defaultPresets + (customText?.let { parseKeyboardActionsYamlText(it) } ?: emptyMap())
-        val customZh: Map<String, KeyBinding>? = customText?.let { parseKeyboardYamlSection(it, "qwerty", presets) }
-        val customEn: Map<String, KeyBinding>? = customText?.let { parseKeyboardYamlSection(it, "qwerty_en", presets) }
+        val zhSection = resolveQwertySection("qwerty", defaultText, customText, isTablet)
+        val enSection = resolveQwertySection("qwerty_en", defaultText, customText, isTablet)
+        val defaultZh = parseKeyboardYamlSection(defaultText, zhSection, defaultPresets)
+            // 变体段只出现在自定义层时，default 层回退基础段
+            ?: (if (zhSection != "qwerty") parseKeyboardYamlSection(defaultText, "qwerty", defaultPresets) else null)
+            ?: return null
+        val defaultEn = parseKeyboardYamlSection(defaultText, enSection, defaultPresets)
+            ?: (if (enSection != "qwerty_en") parseKeyboardYamlSection(defaultText, "qwerty_en", defaultPresets) else emptyMap())
+            ?: emptyMap()
+        val customZh: Map<String, KeyBinding>? = customText?.let { parseKeyboardYamlSection(it, zhSection, presets) }
+        val customEn: Map<String, KeyBinding>? = customText?.let { parseKeyboardYamlSection(it, enSection, presets) }
         val zh = if (customZh != null) defaultZh + customZh else defaultZh
         val en = if (customEn != null) defaultEn + customEn else defaultEn
         return Pair(zh, en)
@@ -1403,15 +1450,21 @@ object KeysConfigHelper {
         val defaultText = readAssetText(context, XIME_CONFIG_FILE) ?: return Pair(ButtonLayout.STANDARD, ButtonLayout.STANDARD)
         val customText = readUserDataText(context, XIME_CUSTOM_CONFIG_FILE)
             ?: readAssetText(context, XIME_CUSTOM_CONFIG_FILE)
-        return parseButtonLayoutTexts(defaultText, customText)
+        return parseButtonLayoutTexts(defaultText, customText, isTabletDevice(context))
     }
 
     /** 纯文本合并解析按键布局：custom 段级覆盖 default，中英文独立，缺省回退 STANDARD。 */
-    internal fun parseButtonLayoutTexts(defaultText: String, customText: String?): Pair<ButtonLayout, ButtonLayout> {
-        val defaultZh = parseButtonLayoutYamlText(defaultText, "qwerty")
-        val defaultEn = parseButtonLayoutYamlText(defaultText, "qwerty_en")
-        val customZh = customText?.let { parseButtonLayoutYamlText(it, "qwerty") }
-        val customEn = customText?.let { parseButtonLayoutYamlText(it, "qwerty_en") }
+    internal fun parseButtonLayoutTexts(
+        defaultText: String,
+        customText: String?,
+        isTablet: Boolean = false,
+    ): Pair<ButtonLayout, ButtonLayout> {
+        val zhSection = resolveQwertySection("qwerty", defaultText, customText, isTablet)
+        val enSection = resolveQwertySection("qwerty_en", defaultText, customText, isTablet)
+        val defaultZh = parseButtonLayoutYamlText(defaultText, zhSection)
+        val defaultEn = parseButtonLayoutYamlText(defaultText, enSection)
+        val customZh = customText?.let { parseButtonLayoutYamlText(it, zhSection) }
+        val customEn = customText?.let { parseButtonLayoutYamlText(it, enSection) }
         val result = Pair(
             customZh ?: defaultZh ?: ButtonLayout.STANDARD,
             customEn ?: defaultEn ?: ButtonLayout.STANDARD,
@@ -1423,14 +1476,18 @@ object KeysConfigHelper {
     private fun parseKeyboardLayoutFromAssets(context: Context): Pair<List<List<String>>, List<List<String>>> {
         val defaultText = readAssetText(context, XIME_CONFIG_FILE) ?: return Pair(DEFAULT_ZH_ROWS, DEFAULT_EN_ROWS)
 
-        val defaultZh = parseKeyboardLayoutYamlText(defaultText, "qwerty")
-        val defaultEn = parseKeyboardLayoutYamlText(defaultText, "qwerty_en")
-
         val customText = readUserDataText(context, XIME_CUSTOM_CONFIG_FILE)
             ?: readAssetText(context, XIME_CUSTOM_CONFIG_FILE)
 
-        val customZh = customText?.let { parseKeyboardLayoutYamlText(it, "qwerty") }
-        val customEn = customText?.let { parseKeyboardLayoutYamlText(it, "qwerty_en") }
+        val isTablet = isTabletDevice(context)
+        val zhSection = resolveQwertySection("qwerty", defaultText, customText, isTablet)
+        val enSection = resolveQwertySection("qwerty_en", defaultText, customText, isTablet)
+
+        val defaultZh = parseKeyboardLayoutYamlText(defaultText, zhSection)
+        val defaultEn = parseKeyboardLayoutYamlText(defaultText, enSection)
+
+        val customZh = customText?.let { parseKeyboardLayoutYamlText(it, zhSection) }
+        val customEn = customText?.let { parseKeyboardLayoutYamlText(it, enSection) }
 
         return Pair(
             customZh ?: defaultZh ?: DEFAULT_ZH_ROWS,

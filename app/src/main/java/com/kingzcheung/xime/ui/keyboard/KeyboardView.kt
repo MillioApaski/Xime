@@ -69,6 +69,7 @@ import com.kingzcheung.xime.service.CandidateState
 import com.kingzcheung.xime.service.ExpandedCandidatePager
 import com.kingzcheung.xime.settings.KeysConfigHelper
 import com.kingzcheung.xime.settings.SettingsPreferences
+import com.kingzcheung.xime.ui.isTablet
 import com.kingzcheung.xime.ui.menubar.ClipboardView
 import com.kingzcheung.xime.ui.menubar.SchemaListView
 import com.kingzcheung.xime.ui.menubar.ToolbarCustomizeView
@@ -1215,13 +1216,15 @@ fun KeyboardView(
                         keyboardBackgroundColor = keyboardBgColor,
                         shadowEnabled = kbShadow.enabled,
                         shadowElevation = kbShadow.elevation.dp,
-                        shadowShapeRadius = kbShadow.shapeRadius.dp,
-                        keyCornerRadius = kbKey.cornerRadius.dp,
-                        keySpacingX = kbKey.spacingFor("number").first?.dp,
-                        keySpacingY = kbKey.spacingFor("number").second?.dp,
+                        // 平板参数档：面板键圆角/阴影对齐键圆角下限、间距加大（与主键盘一致），手机不变
+                        shadowShapeRadius = if (isTablet()) maxOf(kbShadow.shapeRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbShadow.shapeRadius.dp,
+                        keyCornerRadius = if (isTablet()) maxOf(kbKey.cornerRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbKey.cornerRadius.dp,
+                        keySpacingX = kbKey.spacingFor("number").first?.dp ?: if (isTablet()) 4.dp else null,
+                        keySpacingY = kbKey.spacingFor("number").second?.dp ?: if (isTablet()) 6.dp else null,
                         onKeyPressDown = callbacks.onKeyPressDown,
                         isFloatingMode = state.isFloatingMode,
                         specialKeyTextColor = specialKeyTextColor,
+                        landscapeSplit = SettingsPreferences.isLandscapeSplitKeyboardEnabled(LocalContext.current),
                         modifier = Modifier.weight(1f).fillMaxWidth()
                     )
 
@@ -1254,13 +1257,14 @@ fun KeyboardView(
                         keyboardBackgroundColor = keyboardBgColor,
                         shadowEnabled = kbShadow.enabled,
                         shadowElevation = kbShadow.elevation.dp,
-                        shadowShapeRadius = kbShadow.shapeRadius.dp,
-                        keyCornerRadius = kbKey.cornerRadius.dp,
-                        keySpacingX = kbKey.spacingFor("symbol").first?.dp,
-                        keySpacingY = kbKey.spacingFor("symbol").second?.dp,
+                        shadowShapeRadius = if (isTablet()) maxOf(kbShadow.shapeRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbShadow.shapeRadius.dp,
+                        keyCornerRadius = if (isTablet()) maxOf(kbKey.cornerRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbKey.cornerRadius.dp,
+                        keySpacingX = kbKey.spacingFor("symbol").first?.dp ?: if (isTablet()) 4.dp else null,
+                        keySpacingY = kbKey.spacingFor("symbol").second?.dp ?: if (isTablet()) 6.dp else null,
                         onKeyPressDown = callbacks.onKeyPressDown,
                         isFloatingMode = state.isFloatingMode,
                         specialKeyTextColor = specialKeyTextColor,
+                        landscapeSplit = SettingsPreferences.isLandscapeSplitKeyboardEnabled(LocalContext.current),
                         modifier = Modifier.weight(1f).fillMaxWidth()
                     )
 

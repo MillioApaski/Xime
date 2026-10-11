@@ -73,6 +73,11 @@ val LocalKeyVisualPadding = staticCompositionLocalOf {
  *  手机横屏键矮，提示按默认方式画在主字符上下方（offset ±hintOffset）会被键盘顶部裁掉。 */
 val LocalSwipeHintCorner = staticCompositionLocalOf { false }
 
+/** 键面提示放大系数：1f=手机；平板为 1.35f（键盘根层提供）。驱动上滑提示字号/加深/
+ *  角标内边距、字母加粗与 tap 气泡缺省。键组件统一读取本 Local，布局自由自定义时
+ *  任何键（字母/退格/空格等）的提示样式都随设备档一致变化。 */
+val LocalHintExtraScale = staticCompositionLocalOf { 1f }
+
 /** 按键圆角半径，由各布局在根层通过 CompositionLocalProvider 提供。
  *  独立于 shadow.shape_radius，为统一配置化而设。 */
 val LocalKeyCornerRadius = staticCompositionLocalOf { 8.dp }
@@ -795,7 +800,10 @@ fun SwipeableKeyButton(
         val contentScale = adaptiveKeyContentScale(maxHeight.value)
         val hintScale = adaptiveHintScale(contentScale)
         val hintOffset = adaptiveHintOffsetDp(contentScale).dp
-        val effectiveSwipeFontSize = (swipeFontSize.value * hintScale).sp
+        val hintExtraScale = LocalHintExtraScale.current
+        val effectiveSwipeFontSize = (swipeFontSize.value * hintScale * hintExtraScale).sp
+        // 平板大键（hintExtraScale > 1）时上标同步加深，对齐 Gboard 数字上标的醒目程度
+        val hintAlpha = if (hintExtraScale > 1f) 0.72f else 0.5f
 
         if (layoutMode == ButtonLayout.COMPACT) {
             Box(modifier = Modifier.fillMaxSize()) {
@@ -890,7 +898,8 @@ fun SwipeableKeyButton(
                         text = text,
                         color = textColor,
                         fontSize = ((if (fontSize != androidx.compose.ui.unit.TextUnit.Unspecified) fontSize.value else if (text.length > 2) 14f else 18f) * contentScale).sp,
-                        fontWeight = if (text.length > 2) FontWeight.Medium else FontWeight.Normal,
+                        // 平板大键（hintExtraScale > 1）单字母也用 Medium，避免大键面上 Normal 显细
+                        fontWeight = if (text.length > 2 || hintExtraScale > 1f) FontWeight.Medium else FontWeight.Normal,
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         fontFamily = keyFontFamily
@@ -942,7 +951,7 @@ fun SwipeableKeyButton(
                     else if (keyLabel.length <= 4) keyLabel else keyLabel.take(4)
                 Text(
                     text = displayText,
-                    color = textColor.copy(alpha = 0.6f),
+                    color = textColor.copy(alpha = if (hintExtraScale > 1f) hintAlpha else 0.6f),
                     fontSize = effectiveSwipeFontSize,
                     fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center,
@@ -952,7 +961,11 @@ fun SwipeableKeyButton(
                     lineHeight = if (swipeHintCorner && hintLineCount == 1) 1.sp else androidx.compose.ui.unit.TextUnit.Unspecified,
                     modifier = if (swipeHintCorner) Modifier
                         .align(Alignment.TopEnd)
-                        .padding(top = 2.dp, end = 4.dp)
+                        // 平板大键上标离角更远（贴角顶点太局促），手机横屏维持紧凑 2/4dp
+                        .padding(
+                            top = if (hintExtraScale > 1f) 5.dp else 2.dp,
+                            end = if (hintExtraScale > 1f) 10.dp else 4.dp,
+                        )
                     else Modifier.offset(y = -hintOffset),
                     fontFamily = keyLabelFontFamily
                 )
@@ -1493,17 +1506,22 @@ fun SwipeableIconKeyButton(
         if (!swipeText.isNullOrEmpty()) {
             // 键矮场景（LocalSwipeHintCorner，手机横屏）：提示画右上角，避免 offset 提示被键盘顶部裁掉
             val hintCorner = LocalSwipeHintCorner.current
+            // 平板（LocalHintExtraScale > 1）提示加大加深、离角更远，与字母键上标同规则
+            val hintExtraScale = LocalHintExtraScale.current
             Text(
                 text = swipeText,
-                color = iconColor.copy(alpha = 0.5f),
-                fontSize = 9.sp,
+                color = iconColor.copy(alpha = if (hintExtraScale > 1f) 0.72f else 0.5f),
+                fontSize = (9f * hintExtraScale).sp,
                 fontWeight = FontWeight.Normal,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 lineHeight = if (hintCorner) 1.sp else androidx.compose.ui.unit.TextUnit.Unspecified,
                 modifier = if (hintCorner) Modifier
                     .align(Alignment.TopEnd)
-                    .padding(top = 2.dp, end = 4.dp)
+                    .padding(
+                        top = if (hintExtraScale > 1f) 5.dp else 2.dp,
+                        end = if (hintExtraScale > 1f) 10.dp else 4.dp,
+                    )
                 else Modifier.offset(y = (-14).dp),
                 fontFamily = keyLabelFontFamily
             )

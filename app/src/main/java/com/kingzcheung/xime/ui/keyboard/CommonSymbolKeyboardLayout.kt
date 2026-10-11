@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
+import com.kingzcheung.xime.ui.isTablet
 import androidx.compose.ui.unit.Dp
 import com.kingzcheung.xime.keyboard.KeyboardDimensions
 import androidx.compose.ui.unit.dp
@@ -82,11 +83,13 @@ fun CommonSymbolKeyboardLayout(
     specialKeyTextColor: Color = Color.White,
     /** 进入面板时的初始模式（来自 ascii 记忆状态机），为 null 时退回 [isAsciiMode]。 */
     initialAsciiMode: Boolean? = null,
+    /** 横屏时是否左右分体（跟随"分体键盘"设置）；关闭时横屏用整块布局 */
+    landscapeSplit: Boolean = false,
 ) {
     var localAsciiMode by remember(initialAsciiMode) { mutableStateOf(initialAsciiMode ?: isAsciiMode) }
 
     val configuration = LocalConfiguration.current
-    val isLandscape = !isFloatingMode && configuration.screenWidthDp > configuration.screenHeightDp
+    val isLandscape = !isFloatingMode && landscapeSplit && configuration.screenWidthDp > configuration.screenHeightDp
     val isDarkTheme = keyTextColor == Color(0xFFE8EAED)
     val suppressCursorMove = LocalSuppressCursorMove.current
     val swipeBubble = rememberSwipeBubbleController()
@@ -164,7 +167,8 @@ fun CommonSymbolKeyboardLayout(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight()
-                    .padding(start = 4.dp, end = 4.dp, bottom = 8.dp),
+                    // 平板两侧留边（与主键盘一致），手机维持 4dp
+                    .padding(start = if (isTablet()) 16.dp else 4.dp, end = if (isTablet()) 16.dp else 4.dp, bottom = 8.dp),
             ) {
                 Row(
                     modifier = Modifier
