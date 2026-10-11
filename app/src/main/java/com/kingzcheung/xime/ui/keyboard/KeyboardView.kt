@@ -183,7 +183,8 @@ fun KeyboardView(
         val prevContext = lastAsciiContext
         val curContext = viewState.asciiContext()
         lastAsciiContext = curContext
-        if (prevContext == null || prevContext == curContext) return@LaunchedEffect
+        // curContext 为 null（符号面板）时不参与同步：不进/退该面板都不碰引擎中英态
+        if (prevContext == null || curContext == null || prevContext == curContext) return@LaunchedEffect
         viewModel.asciiStateMachine.saveMemory(prevContext, state.isAsciiMode)
         val target = viewModel.asciiStateMachine.targetFor(curContext, state.isAsciiMode)
         if (target != null) {
@@ -911,6 +912,9 @@ fun KeyboardView(
                         }
                         val numberOnKeyPress: (String) -> Unit = { key ->
                             when (key) {
+                                // 面板上的 shift/caps 键（caps 功能键 id 发 "shift_caps"）：
+                                // 接入 26 键同款 shift 状态机，避免字符串落到引擎被当成编码
+                                "shift", "shift_single", "shift_caps" -> viewModel.consumeShiftKey(key)
                                 "abc" -> {
                                     callbacks.onKeyPress("abc", false)
                                     if (page is KeyboardPage.Panel) {
@@ -959,6 +963,7 @@ fun KeyboardView(
                         }
                         val commonSymbolOnKeyPress: (String) -> Unit = { key ->
                             when (key) {
+                                "shift", "shift_single", "shift_caps" -> viewModel.consumeShiftKey(key)
                                 "abc" -> {
                                     // 返回主键盘：面板内 ascii 模式不应影响主键盘布局，
                                     // 用主键盘记忆（或恢复进入面板前状态），避免"先英文后切回中文"闪变。
@@ -1195,10 +1200,16 @@ fun KeyboardView(
             val isPanelKeyboard = page is KeyboardPage.Panel
             if (isPanelKeyboard) {
                 val panelType = (page as KeyboardPage.Panel).type
+                // 面板圆角与平板 26 键共用同一条规则（yaml 按键盘覆盖优先 → 设备档默认，
+                // 平板用大键面档）：xime.yaml 写 keyboard.key.number/symbol.corner_radius 可单独调
+                val numberPanelRadius = keyCornerRadiusFor(kbKey, "number", isTablet())
+                val symbolPanelRadius = keyCornerRadiusFor(kbKey, "symbol", isTablet())
                 when (panelType) {
-                    PanelType.NUMBER -> NumberKeyboardLayout(
+                    PanelType.NUMBER -> PanelKeyboardLayout(
+                        section = "number",
                         onKeyPress = { key ->
                             when (key) {
+                                "shift", "shift_single", "shift_caps" -> viewModel.consumeShiftKey(key)
                                 "abc" -> viewModel.exitPanel()
                                 "symbol" -> {
                                     viewModel.showOverlay(OverlayRoute.Symbol)
@@ -1209,6 +1220,10 @@ fun KeyboardView(
                                 else -> callbacks.onKeyPress(key, false)
                             }
                         },
+                        viewModel = viewModel,
+                        callbacks = callbacks,
+                        uiState = state,
+                        isAsciiMode = state.isAsciiMode,
                         keyBackgroundColor = keyBgColor,
                         keyTextColor = keyTextColor,
                         specialKeyBackgroundColor = specialKeyBgColor,
@@ -1216,9 +1231,9 @@ fun KeyboardView(
                         keyboardBackgroundColor = keyboardBgColor,
                         shadowEnabled = kbShadow.enabled,
                         shadowElevation = kbShadow.elevation.dp,
-                        // 平板参数档：面板键圆角/阴影对齐键圆角下限、间距加大（与主键盘一致），手机不变
-                        shadowShapeRadius = if (isTablet()) maxOf(kbShadow.shapeRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbShadow.shapeRadius.dp,
-                        keyCornerRadius = if (isTablet()) maxOf(kbKey.cornerRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbKey.cornerRadius.dp,
+                        // 平板参数档：阴影圆角不小于键圆角（与主键盘同规则）
+                        shadowShapeRadius = maxOf(kbShadow.shapeRadius.dp, numberPanelRadius),
+                        keyCornerRadius = numberPanelRadius,
                         keySpacingX = kbKey.spacingFor("number").first?.dp ?: if (isTablet()) 4.dp else null,
                         keySpacingY = kbKey.spacingFor("number").second?.dp ?: if (isTablet()) 6.dp else null,
                         onKeyPressDown = callbacks.onKeyPressDown,
@@ -1228,9 +1243,11 @@ fun KeyboardView(
                         modifier = Modifier.weight(1f).fillMaxWidth()
                     )
 
-                    PanelType.COMMON_SYMBOL -> CommonSymbolKeyboardLayout(
+                    PanelType.COMMON_SYMBOL -> PanelKeyboardLayout(
+                        section = "common_symbols",
                         onKeyPress = { key ->
                             when (key) {
+                                "shift", "shift_single", "shift_caps" -> viewModel.consumeShiftKey(key)
                                 "abc" -> {
                                     viewModel.exitPanel()
                                 }
@@ -1246,10 +1263,10 @@ fun KeyboardView(
                                 else -> callbacks.onKeyPress(key, false)
                             }
                         },
+                        viewModel = viewModel,
+                        callbacks = callbacks,
+                        uiState = state,
                         isAsciiMode = state.isAsciiMode,
-                        initialAsciiMode = viewModel.asciiStateMachine.targetFor(
-                            AsciiKeyboardContext.SYMBOL_PANEL, state.isAsciiMode
-                        ) ?: state.isAsciiMode,
                         keyBackgroundColor = keyBgColor,
                         keyTextColor = keyTextColor,
                         specialKeyBackgroundColor = specialKeyBgColor,
@@ -1257,8 +1274,8 @@ fun KeyboardView(
                         keyboardBackgroundColor = keyboardBgColor,
                         shadowEnabled = kbShadow.enabled,
                         shadowElevation = kbShadow.elevation.dp,
-                        shadowShapeRadius = if (isTablet()) maxOf(kbShadow.shapeRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbShadow.shapeRadius.dp,
-                        keyCornerRadius = if (isTablet()) maxOf(kbKey.cornerRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbKey.cornerRadius.dp,
+                        shadowShapeRadius = maxOf(kbShadow.shapeRadius.dp, symbolPanelRadius),
+                        keyCornerRadius = symbolPanelRadius,
                         keySpacingX = kbKey.spacingFor("symbol").first?.dp ?: if (isTablet()) 4.dp else null,
                         keySpacingY = kbKey.spacingFor("symbol").second?.dp ?: if (isTablet()) 6.dp else null,
                         onKeyPressDown = callbacks.onKeyPressDown,
@@ -1576,3 +1593,21 @@ private data class DeletePendingWord(
     val word: String,
     val onConfirm: () -> Unit,
 )
+
+/**
+ * 面板类键盘（数字 / 常用符号）上的 shift / caps 键：`caps` 功能键 id 会发 "shift_caps"，
+ * 而面板没有可作用的字符，这里接到与 26 键相同的 shift 状态机（大写锁定保留，回 26 键生效），
+ * 返回 true 表示已消费——否则这些字符串会继续走到引擎被当成编码输入。
+ */
+private fun KeyboardViewModel.consumeShiftKey(key: String): Boolean = when (key) {
+    "shift" -> {
+        toggleShift(); true
+    }
+    "shift_single" -> {
+        singleTapShift(); true
+    }
+    "shift_caps" -> {
+        doubleTapShift(); true
+    }
+    else -> false
+}

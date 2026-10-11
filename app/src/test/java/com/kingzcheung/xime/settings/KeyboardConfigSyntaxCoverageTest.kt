@@ -430,6 +430,11 @@ class KeyboardConfigSyntaxCoverageTest {
         // stroke/handwriting 可只有 schemas 无 keys，解析不抛即可
         KeysConfigHelper.parseKeyboardYamlSection(text, "stroke")
         KeysConfigHelper.parseKeyboardYamlSection(text, "handwriting")
+        // 面板段（数字/常用符号，布局 + 手势）解析不抛；段结构与键 id 契约见 KeyboardPanelConfigTest
+        for (section in KeysConfigHelper.PANEL_SECTIONS) {
+            assertNotNull("xime.yaml 缺少 $section layout", KeysConfigHelper.parsePanelLayoutYamlText(text, section))
+            KeysConfigHelper.parseKeyboardYamlSection(text, section)
+        }
         KeysConfigHelper.parseKeyboardActionsYamlText(text)
         val (zhLayout, enLayout) = KeysConfigHelper.parseButtonLayoutTexts(text, null)
         assertTrue(zhLayout in ButtonLayout.entries)

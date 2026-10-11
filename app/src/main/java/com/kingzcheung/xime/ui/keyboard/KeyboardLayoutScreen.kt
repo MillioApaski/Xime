@@ -16,6 +16,7 @@ import com.kingzcheung.xime.handwriting.HandwritingCandidate
 import com.kingzcheung.xime.rime.T9InputController
 import com.kingzcheung.xime.service.CandidateState
 import com.kingzcheung.xime.settings.KeysConfigHelper
+import com.kingzcheung.xime.ui.isTablet
 import com.kingzcheung.xime.ui.theme.KeyboardThemes
 import com.kingzcheung.xime.ui.theme.resolveSolidColor
 import com.kingzcheung.xime.util.FileLogger
@@ -160,8 +161,13 @@ fun KeyboardLayoutScreen(
                 // 从全键盘（?123 在左下角）进入数字键盘时，返回键放到左下角与进入位置对齐；
                 // 九键/笔画/手写进入时保持「符号键在最左下角」的九键习惯
                 val lastMainLayout by viewModel.lastMainLayout.collectAsStateWithLifecycle()
-                NumberKeyboardLayout(
+                PanelKeyboardLayout(
+                    section = "number",
                     onKeyPress = onKeyPress,
+                    viewModel = viewModel,
+                    callbacks = callbacks,
+                    uiState = uiState,
+                    isAsciiMode = uiState.isAsciiMode,
                     keyBackgroundColor = keyBgColor,
                     keyTextColor = keyTextColor,
                     specialKeyBackgroundColor = specialKeyBgColor,
@@ -169,8 +175,8 @@ fun KeyboardLayoutScreen(
                     keyboardBackgroundColor = keyboardBgColor,
                     shadowEnabled = kbShadow.enabled,
                     shadowElevation = kbShadow.elevation.dp,
-                    shadowShapeRadius = kbShadow.shapeRadius.dp,
-                    keyCornerRadius = kbKey.cornerRadius.dp,
+                    shadowShapeRadius = maxOf(kbShadow.shapeRadius.dp, keyCornerRadiusFor(kbKey, "number", isTablet())),
+                    keyCornerRadius = keyCornerRadiusFor(kbKey, "number", isTablet()),
                     keySpacingX = kbKey.spacingFor("number").first?.dp,
                     keySpacingY = kbKey.spacingFor("number").second?.dp,
                     modifier = modifier,
@@ -183,8 +189,12 @@ fun KeyboardLayoutScreen(
             }
 
             is KeyboardLayoutState.CommonSymbol -> {
-                CommonSymbolKeyboardLayout(
+                PanelKeyboardLayout(
+                    section = "common_symbols",
                     onKeyPress = onKeyPress,
+                    viewModel = viewModel,
+                    callbacks = callbacks,
+                    uiState = uiState,
                     isAsciiMode = uiState.isAsciiMode,
                     keyBackgroundColor = keyBgColor,
                     keyTextColor = keyTextColor,
@@ -193,8 +203,8 @@ fun KeyboardLayoutScreen(
                     keyboardBackgroundColor = keyboardBgColor,
                     shadowEnabled = kbShadow.enabled,
                     shadowElevation = kbShadow.elevation.dp,
-                    shadowShapeRadius = kbShadow.shapeRadius.dp,
-                    keyCornerRadius = kbKey.cornerRadius.dp,
+                    shadowShapeRadius = maxOf(kbShadow.shapeRadius.dp, keyCornerRadiusFor(kbKey, "symbol", isTablet())),
+                    keyCornerRadius = keyCornerRadiusFor(kbKey, "symbol", isTablet()),
                     keySpacingX = kbKey.spacingFor("symbol").first?.dp,
                     keySpacingY = kbKey.spacingFor("symbol").second?.dp,
                     modifier = modifier,
