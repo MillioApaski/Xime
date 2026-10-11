@@ -3,15 +3,12 @@ package com.kingzcheung.xime.clipboard
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ContentResolver
-import android.content.ContentValues
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.os.Handler
 import android.os.Looper
-import android.provider.MediaStore
 import android.util.Log
 import android.widget.Toast
 import androidx.core.content.FileProvider
@@ -509,8 +506,10 @@ class ClipboardManager private constructor(private val context: Context) {
             runCatching {
                 imageMutex.withLock { enforceImageQuotaLocked(imageLimits()) }
             }.onFailure { Log.w(TAG, "Clipboard image startup cleanup failed", it) }
+            // 启动自检：上次没删干净的中转图
+            runCatching { MediaBridge.sweepStale(context) }
+                .onFailure { Log.w(TAG, "Media bridge startup sweep failed", it) }
         }
-        startListening()
     }
 
     /**
@@ -880,70 +879,42 @@ class ClipboardManager private constructor(private val context: Context) {
     }
 
     /**
-     * 拖拽发送用：图片条目的可共享 content URI（FileProvider 优先，MediaStore 降级）。
-     * 非图片条目 / 文件不存在 / 获取失败返回 null（拖拽发起方回退长按菜单）。
+     * 拖拽发送用：图片的可共享 content URI。
+     * FileProvider 优先（零写入，接收方靠拖拽的 URI 读授权）；仅 FileProvider 抛错时走
+     * [MediaBridge] 中转（Download/Xime，不写相册，用完即删）。取不到返回 null（回退长按菜单）。
      */
     fun dragImageUri(item: ClipboardItem): Uri? {
         val file = imageFileOf(item) ?: return null
-        return getContentUriForImage(file)
+        try {
+            return fileProviderUri(file)
+        } catch (e: Exception) {
+            Log.w(TAG, "FileProvider getUriForFile failed for drag, falling back to MediaStore bridge", e)
+        }
+        val mime = ClipboardImageStore.mimeForExtension(file.extension) ?: "image/jpeg"
+        return MediaBridge.insert(context, file, mime)
     }
 
     /**
-     * 生成图片 content URI。
-     *
-     * 优先使用 FileProvider；Android 12+ 部分厂商 ROM 上
-     * FileProvider.getUriForFile 内部 resolveContentProvider 以 USER_ALL(-10000)
-     * 校验跨用户权限时抛 "Invalid userId -10000"，此时降级为 MediaStore
-     * 插入图片获取系统 content URI（API 29+ 免权限）。
+     * 生成图片 content URI（复制到系统剪贴板 / Emoji 共享）：FileProvider 优先，
+     * 抛错时降级 [MediaBridge] 中转（不写相册）。
      *
      * @param sharedFile 共享给外部的文件（FileProvider 用）
-     * @param sourceFile 原始图片文件（MediaStore 降级与 MIME 推断用）
+     * @param sourceFile 原始图片文件（中转与 MIME 推断用）
      */
     private fun getContentUriForImage(sharedFile: File, sourceFile: File = sharedFile): Uri? {
         try {
-            return FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                sharedFile
-            )
+            return fileProviderUri(sharedFile)
         } catch (e: Exception) {
-            Log.w(TAG, "FileProvider getUriForFile failed, falling back to MediaStore", e)
+            Log.w(TAG, "FileProvider getUriForFile failed, falling back to MediaStore bridge", e)
         }
-        return insertImageToMediaStore(sourceFile)
+        val mime = ClipboardImageStore.mimeForExtension(sourceFile.extension) ?: "image/jpeg"
+        return MediaBridge.insert(context, sourceFile, mime)
     }
 
-    /** 把图片插入 MediaStore（Pictures/Xime），返回系统 content URI。 */
-    private fun insertImageToMediaStore(imageFile: File): Uri? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            Log.e(TAG, "MediaStore fallback requires API 29+, clipboard image copy failed")
-            return null
-        }
-        return try {
-            val resolver = context.contentResolver
-            // MIME 按扩展名推断（剪贴板图片可能是 PNG/WebP/GIF，写死 image/jpeg 会让部分应用解析失败）
-            val mime = ClipboardImageStore.mimeForExtension(imageFile.extension) ?: "image/jpeg"
-            val values = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, imageFile.name)
-                put(MediaStore.Images.Media.MIME_TYPE, mime)
-                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Xime")
-                put(MediaStore.Images.Media.IS_PENDING, 1)
-            }
-            val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            val uri = resolver.insert(collection, values) ?: return null
-            try {
-                resolver.openOutputStream(uri)?.use { output ->
-                    FileInputStream(imageFile).use { input -> input.copyTo(output) }
-                } ?: return null
-                val update = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
-                resolver.update(uri, update, null, null)
-                uri
-            } catch (e: Exception) {
-                resolver.delete(uri, null, null)
-                throw e
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "MediaStore insert failed", e)
-            null
-        }
-    }
+    /** FileProvider URI（`files-path` 已覆盖 `files/clipboard_images` 与 `cache/emoji_cache`）。 */
+    private fun fileProviderUri(file: File): Uri = FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        file,
+    )
 }
