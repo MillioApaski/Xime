@@ -50,6 +50,19 @@ class KeyboardDeviceStyleTest {
         }
     }
 
+    @Test
+    fun `overlay 面板（全量符号与表情）圆角同样按设备档`() {
+        // 这两块没有 xime.yaml 段，按全局值 + 平板大键面档，与 26 键/面板同观感
+        val plain = KeyboardKeyConfig()
+        assertEquals(8.dp, overlayKeyCornerRadius(plain, isTablet = false))
+        assertEquals(14.dp, overlayKeyCornerRadius(plain, isTablet = true))
+        assertEquals(
+            "同一设备上 overlay 与 26 键圆角一致",
+            keyCornerRadiusFor(plain, "qwerty", isTablet = true),
+            overlayKeyCornerRadius(plain, isTablet = true),
+        )
+    }
+
     // ── 键面提示（角标画法 / 放大倍率） ──────────────────────
 
     @Test

@@ -497,12 +497,12 @@ keyboard:
       delete: { width: 1.4, tap: { action: delete }, long_press: { values: [ { action: delete, label: "删除" } ] }, swipe_up: { action: clear_all, label: "上滑清空" }, swipe_down: { action: undo_clear, label: "下滑撤回" }, swipe_left: { action: command, value: clear_composition }, swipe_right: { action: command, value: clear_composition } }
       # ── 第四行功能键（位置/是否出现由上方 layout.rows 第四行决定；行为在此定义）──
       # ?123：单击切面板，长按弹出「数字 / 常用符号」（命令值走键盘按键路由）
-      mode_change: { width: 1.2, tap: { action: command, value: mode_change }, long_press: { display: bubble, values: [ { label: number, action: command, value: mode_change_number }, { label: common_symbol, action: command, value: mode_change_common_symbol } ] } }
+      mode_change: { width: 1.2, tap: { action: command, value: mode_change, bubble: false }, long_press: { display: bubble, values: [ { label: number, action: command, value: mode_change_number }, { label: common_symbol, action: command, value: mode_change_common_symbol } ] } }
       # 空格键：单击上屏空格；长按进入语音输入（含麦克风权限校验）
       # 长按若想改为「重复空格」：long_press: { values: [ { action: repeat_space, value: 5 } ] }
       space: { width: 3, tap: { action: space }, long_press: { values: [ { label: "语音", action: voice } ] } }
       # 回车键
-      enter: { width: 1.2, tap: { action: enter } }
+      enter: { width: 1.2, tap: { action: enter, bubble: false } }
       #  逗号键，label 为中文显示，value 为英文显示+提交值
       comma: { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
       # 中/英切换键，label 为按键显示文字
@@ -558,7 +558,7 @@ keyboard:
       # delete：单击删除、长按重复删、上滑清空、下滑撤回、左右滑清空输入
       delete: { width: 1.4, tap: { action: delete }, long_press: { values: [ { action: delete, label: "删除" } ] }, swipe_up: { action: clear_all, label: "上滑清空" }, swipe_down: { action: undo_clear, label: "下滑撤回" }, swipe_left: { action: command, value: clear_composition }, swipe_right: { action: command, value: clear_composition } }
       # ?123：单击切面板，长按弹出「数字 / 常用符号」
-      mode_change: { width: 1.2, tap: { action: command, value: mode_change }, long_press: { display: bubble, values: [ { label: number, action: command, value: mode_change_number }, { label: common_symbol, action: command, value: mode_change_common_symbol } ] } }
+      mode_change: { width: 1.2, tap: { action: command, value: mode_change , bubble: false}, long_press: { display: bubble, values: [ { label: number, action: command, value: mode_change_number }, { label: common_symbol, action: command, value: mode_change_common_symbol } ] } }
       # 空格键：单击上屏空格；长按进入语音输入（含麦克风权限校验）
       # 长按若想改为「重复空格」：long_press: { values: [ { action: repeat_space, value: 5 } ] }
       space: { width: 3, tap: { action: space }, long_press: { values: [ { label: "语音", action: voice } ] } }
@@ -567,7 +567,7 @@ keyboard:
       #  逗号键，label 为中文显示，value 为英文显示+提交值
       comma: { tap: { label: ".", value: "." }, swipe_up: { label: ",", value: "," } }
       # 中/英切换键，label 为按键显示文字
-      earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
+      earth: { tap: { label: "@language", action: "toggle_ascii" , bubble: false}, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
 
   # ── 平板/大屏键盘布局（设备档变体）──
   # 平板（smallestWidth ≥ 600dp，不随横竖屏变化）上自动整段替换同名基础段

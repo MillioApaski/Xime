@@ -214,7 +214,7 @@ fun PanelKeyboardLayout(
  * `keyboard.key.<段>_tablet.spacing_x/y`）⇒ 键面距屏幕边 20dp、相邻键面横 8dp / 竖 12dp，
  * 与平板 26 键完全同档。
  */
-private fun panelOuterPadding(isLandscape: Boolean, isTablet: Boolean): PaddingValues = when {
+internal fun panelOuterPadding(isLandscape: Boolean, isTablet: Boolean): PaddingValues = when {
     isTablet -> PaddingValues(start = 16.dp, end = 16.dp, bottom = 8.dp)
     isLandscape -> PaddingValues(horizontal = 50.dp, vertical = 2.dp)
     else -> PaddingValues(start = 4.dp, end = 4.dp, bottom = 8.dp)

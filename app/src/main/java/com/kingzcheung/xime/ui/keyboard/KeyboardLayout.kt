@@ -580,6 +580,14 @@ internal fun hintExtraScaleFor(isTablet: Boolean): Float = if (isTablet) TABLET_
  * 平板 26 键与各面板（数字/常用符号）共用这一条，保证同一设备上各处键圆角一致；
  * 想单独调某个键盘就写 `<键盘名>: { corner_radius: N }`。
  */
+/**
+ * overlay 面板（全量符号 / 表情）的键圆角：这两块没有 xime.yaml 段，所以按全局
+ * `keyboard.key.corner_radius` + 设备档（平板大键面档），与 26 键/面板同一观感。
+ * 全量符号面板另用 [keyCornerRadiusFor] 传 "symbol"，让 `key.symbol.corner_radius` 也能管到它。
+ */
+internal fun overlayKeyCornerRadius(kbKey: KeyboardKeyConfig, isTablet: Boolean): Dp =
+    if (isTablet) maxOf(kbKey.cornerRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbKey.cornerRadius.dp
+
 internal fun keyCornerRadiusFor(kbKey: KeyboardKeyConfig, keyboard: String, isTablet: Boolean): Dp =
     kbKey.spacingOverrides[keyboard]?.cornerRadius?.dp
         ?: if (isTablet) maxOf(kbKey.cornerRadius.dp, TABLET_KEY_CORNER_RADIUS) else kbKey.cornerRadius.dp
