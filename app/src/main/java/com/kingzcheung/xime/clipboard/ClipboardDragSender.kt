@@ -33,13 +33,8 @@ import kotlinx.coroutines.withTimeout
 /**
  * 剪贴板条目的跨应用拖拽发送（issue #1062）。
  *
- * 发起：`View.startDragAndDrop` + `View.DRAG_FLAG_GLOBAL`（跨应用并授予 ClipData
- * 内 URI 的读权限）。文本走 text/plain；图片走 [ClipboardManager.dragImageUri]
- * （FileProvider 优先 → MediaStore 降级）的 content URI，目标应用（QQ/TIM 等）
- * 在 drop 时按 MIME 读取。
- *
- * 与长按菜单并存的手势语义见 [Modifier.clipboardLongPressDrag]：
- * 长按抬起未拖拽 → 菜单；长按后拖出 touch slop → 拖拽发送。
+ * 文本走 text/plain；图片走 [ClipboardManager.dragImageUri] 的 content URI，目标应用在 drop 时按 MIME 读取。
+ * 与长按菜单并存的手势语义见 [Modifier.clipboardLongPressDrag]。
  */
 object ClipboardDragSender {
 
@@ -47,6 +42,13 @@ object ClipboardDragSender {
     internal const val SHADOW_TEXT_W_DP = 160
     internal const val SHADOW_TEXT_H_DP = 48
     internal const val SHADOW_IMAGE_DP = 72
+
+    /**
+     * 拖拽 flags：跨应用必须 GLOBAL；带 content URI 时必须加 URI_READ，否则接收方拿不到
+     * URI 读权限（IM 多数不会自己调 requestDragAndDropPermissions，表现为拖过去没反应）。
+     */
+    internal fun dragFlags(hasUri: Boolean): Int =
+        View.DRAG_FLAG_GLOBAL or (if (hasUri) View.DRAG_FLAG_GLOBAL_URI_READ else 0)
 
     /**
      * 发起拖拽发送。
@@ -66,7 +68,7 @@ object ClipboardDragSender {
                 ClipData.newPlainText(dragLabel(item), item.text) to
                     ClipboardDragShadowBuilder(view, item, null, density)
             }
-            view.startDragAndDrop(clip, shadow, null, View.DRAG_FLAG_GLOBAL)
+            view.startDragAndDrop(clip, shadow, null, dragFlags(hasUri = item.isImage))
         } catch (e: Exception) {
             android.util.Log.w("ClipboardDrag", "startDragAndDrop failed", e)
             false
