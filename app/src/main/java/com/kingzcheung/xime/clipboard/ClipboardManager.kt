@@ -510,6 +510,7 @@ class ClipboardManager private constructor(private val context: Context) {
             runCatching { MediaBridge.sweepStale(context) }
                 .onFailure { Log.w(TAG, "Media bridge startup sweep failed", it) }
         }
+        startListening()
     }
 
     /**
@@ -629,8 +630,22 @@ class ClipboardManager private constructor(private val context: Context) {
         )
     }
 
+    /**
+     * 系统剪贴板监听是否已注册（回归防线：b592c882 曾漏调用 [startListening]，
+     * 使复制图片/文本整体不入库。androidTest 断言此状态，防止再次误删）。
+     */
+    @Volatile
+    internal var isListeningToSystemClipboard = false
+        private set
+
+    /**
+     * 注册系统剪贴板变化监听（采集入口，单例仅在 init 调用一次）。
+     * 幂等：系统侧重复注册同一 listener 会让每次剪贴板变化回调两次。
+     */
     private fun startListening() {
+        if (isListeningToSystemClipboard) return
         androidClipboardManager.addPrimaryClipChangedListener(clipboardListener)
+        isListeningToSystemClipboard = true
     }
 
     fun release() {
