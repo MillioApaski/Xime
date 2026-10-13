@@ -64,7 +64,7 @@ class ClipboardManager private constructor(private val context: Context) {
     companion object {
         private const val TAG = "ClipboardManager"
         private const val MAX_ITEMS = 1000
-        private const val MAX_QUICK_SEND_ITEMS = 20
+        private const val MAX_QUICK_SEND_ITEMS = 2000
         private const val PREFS_NAME = "clipboard_prefs"
         private const val KEY_CLIPBOARD_ITEMS = "clipboard_items"
         private const val KEY_QUICK_SEND_ITEMS = "quick_send_items"
