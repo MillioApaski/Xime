@@ -526,7 +526,12 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                     applyWindowBackground()
                 }
                 "stt_enabled" -> {
-                    uiState.value = uiState.value.copy(isSttEnabled = SettingsPreferences.isSttEnabled(this@XimeInputMethodService))
+                    val sttEnabled = SettingsPreferences.isSttEnabled(this@XimeInputMethodService)
+                    uiState.value = uiState.value.copy(isSttEnabled = sttEnabled)
+                    // 关闭开关时结束进行中的语音会话
+                    if (!sttEnabled && (uiState.value.isVoiceMode || voiceRecordingStarted)) {
+                        endVoiceSession()
+                    }
                 }
                 SettingsPreferences.KEY_STT_KEEP_ENGINE_ALIVE -> {
                     // 开启时立即预热模型常驻待命（走 AsrSupport.warmup 注册常驻后端）；

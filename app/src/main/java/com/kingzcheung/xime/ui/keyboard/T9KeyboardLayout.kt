@@ -1174,7 +1174,7 @@ private fun T9SpaceKey(
         modifier = modifier
             .fillMaxHeight()
             .padding(horizontal = 2.dp, vertical = 2.dp)
-            .pointerInput(voiceSticky) {
+            .pointerInput(voiceSticky, isSttEnabled) {
                 detectTapGestures(
                     onPress = {
                         if (voiceSticky) {
@@ -1193,6 +1193,8 @@ private fun T9SpaceKey(
                     },
                     onLongPress = {
                         if (voiceSticky) return@detectTapGestures
+                        // 语音转文本开关关闭时长按不触发语音
+                        if (!isSttEnabled) return@detectTapGestures
                         view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
                         if (!PermissionHelper.hasRecordAudioPermission(context)) {
                             Toast.makeText(context, "需要麦克风权限才能使用语音输入", Toast.LENGTH_SHORT).show()

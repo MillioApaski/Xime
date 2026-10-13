@@ -165,11 +165,14 @@ fun KeyboardLayout(
     val onVoiceModeChange = callbacks.onVoiceModeChange
     val onCommitText = callbacks.onCommitText
     val requestVoice: () -> Unit = {
-        if (!PermissionHelper.hasRecordAudioPermission(context)) {
-            Toast.makeText(context, "需要麦克风权限才能使用语音输入", Toast.LENGTH_SHORT).show()
-            PermissionHelper.requestRecordAudioPermission(context)
-        } else {
-            onVoiceModeChange?.invoke(true)
+        // 语音转文本开关关闭时不响应任何语音入口
+        if (isSttEnabled) {
+            if (!PermissionHelper.hasRecordAudioPermission(context)) {
+                Toast.makeText(context, "需要麦克风权限才能使用语音输入", Toast.LENGTH_SHORT).show()
+                PermissionHelper.requestRecordAudioPermission(context)
+            } else {
+                onVoiceModeChange?.invoke(true)
+            }
         }
     }
     val onGestureAction = buildUiGestureHandler(viewModel, callbacks, uiState, requestVoice)
@@ -420,6 +423,12 @@ fun KeyboardLayout(
 internal fun t9DigitTapRebinds(tap: KeyAction?): Boolean =
     tap != null && tap.action != null &&
         (tap.action != GestureAction.SEND_RIME || tap.value.isNotEmpty())
+
+/**
+ * 语音转文本开关关闭时，xime.yaml 里配置的 `voice` 动作（如空格长按）不生效；其他动作不受影响。
+ */
+internal fun shouldSkipVoiceKeyAction(action: KeyAction?, isSttEnabled: Boolean): Boolean =
+    action?.action == GestureAction.VOICE && !isSttEnabled
 
 internal fun invokeKeyAction(
     action: KeyAction?,
@@ -1012,8 +1021,13 @@ private fun SpaceCell(env: QwertyRowEnv, modifier: Modifier) {
     val onTap: (() -> Unit)? = if (spaceTap != null && spaceTap.action != GestureAction.SPACE) {
         { invokeKeyAction(spaceTap, env.onKeyPress, env.onCommitText, env.onGestureAction) }
     } else null
-    val onLongPress: (() -> Unit)? = spaceLong?.let {
-        { invokeKeyAction(it, env.onKeyPress, env.onCommitText, env.onGestureAction) }
+    val onLongPress: (() -> Unit)? = spaceLong?.let { action ->
+        {
+            // 长按动作由 xime.yaml 配置（默认 action: voice）；语音转文本开关关闭时不触发语音
+            if (!shouldSkipVoiceKeyAction(action, env.isSttEnabled)) {
+                invokeKeyAction(action, env.onKeyPress, env.onCommitText, env.onGestureAction)
+            }
+        }
     }
     val spaceUp = spaceBinding?.swipeUp
     val spaceDown = spaceBinding?.swipeDown
@@ -2004,11 +2018,14 @@ private fun SpaceKey(
 
                         if (currentOnLongPress != null) {
                             currentOnLongPress?.invoke()
-                        } else if (!PermissionHelper.hasRecordAudioPermission(context)) {
-                            Toast.makeText(context, "需要麦克风权限才能使用语音输入", Toast.LENGTH_SHORT).show()
-                            PermissionHelper.requestRecordAudioPermission(context)
-                        } else {
-                            currentOnVoiceModeChange?.invoke(true)
+                        } else if (isSttEnabled) {
+                            // 语音转文本开关关闭时长按不触发语音
+                            if (!PermissionHelper.hasRecordAudioPermission(context)) {
+                                Toast.makeText(context, "需要麦克风权限才能使用语音输入", Toast.LENGTH_SHORT).show()
+                                PermissionHelper.requestRecordAudioPermission(context)
+                            } else {
+                                currentOnVoiceModeChange?.invoke(true)
+                            }
                         }
                     }
 
