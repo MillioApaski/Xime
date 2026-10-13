@@ -175,7 +175,7 @@ internal fun rememberImeKeyboardCallbacks(
                         service.feedbackManager.performVibration()
                     }
                     service.endVoiceSession()
-                } else if (!service.uiState.value.isVoiceMode) {
+                } else if (SettingsPreferences.isSttEnabled(service) && !service.uiState.value.isVoiceMode) {
                     service.uiState.value = service.uiState.value.copy(
                         isVoiceMode = true,
                         voiceSticky = false,
@@ -198,7 +198,7 @@ internal fun rememberImeKeyboardCallbacks(
                 if (state.isVoiceMode && state.voiceSticky) {
                     // 常驻语音中：点按空格/再次点击工具栏即结束
                     service.endVoiceSession()
-                } else if (!state.isVoiceMode) {
+                } else if (SettingsPreferences.isSttEnabled(service) && !state.isVoiceMode) {
                     // 进入常驻语音：保持正常键盘布局，候选栏显示频谱，空格键轻触结束
                     service.uiState.value = service.uiState.value.copy(
                         isVoiceMode = true,

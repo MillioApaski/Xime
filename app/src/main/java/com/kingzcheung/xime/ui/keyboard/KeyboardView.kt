@@ -436,6 +436,10 @@ fun KeyboardView(
                     if (item is ToolbarButtonItem.Builtin && item.button == ToolbarButton.HANDWRITING_LOOKUP) {
                         if (!com.kingzcheung.xime.handwriting.HandwritingEngine.hasModel(LocalContext.current)) return@mapNotNull null
                     }
+                    // 语音转文本开关关闭时隐藏工具栏语音按钮
+                    if (item is ToolbarButtonItem.Builtin && item.button == ToolbarButton.VOICE && !state.isSttEnabled) {
+                        return@mapNotNull null
+                    }
                     val toolbarContext = LocalContext.current
                     val onClick: () -> Unit = when (item) {
                         is ToolbarButtonItem.Builtin -> when (item.button) {
