@@ -119,6 +119,7 @@ import com.kingzcheung.xime.keyboard.KeyboardPage
 import com.kingzcheung.xime.keyboard.OverlayRoute
 import com.kingzcheung.xime.keyboard.ToolbarButtonItem
 import com.kingzcheung.xime.plugin.core.api.PluginResultItem
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -240,7 +241,15 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     init {
         serviceScope.launch {
             keyJobs.consumeEach { job ->
-                job.join()
+                try {
+                    job.join()
+                } catch (e: CancellationException) {
+                    // 服务销毁时正常取消：必须继续向上抛出，否则消费者会吞掉取消信号
+                    throw e
+                } catch (e: Throwable) {
+                    // 单个按键任务失败不能让消费者协程退出，否则后续按键/候选点选会永久堆积失效
+                    FileLogger.e(TAG, "key job failed, keep consuming", e)
+                }
             }
         }
         serviceScope.launch(Dispatchers.Main) {

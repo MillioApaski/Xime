@@ -1087,7 +1087,16 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
             }
             service.rimeEngine.selectCandidate(rimeIndex)
         }
-        if (!selectRimeOk) return
+        if (!selectRimeOk) {
+            // 引擎拒绝该索引（通常是界面候选与引擎当前页不一致）：刷新候选让两者重新对齐，
+            // 而不是静默无反应（用户会表现为"点候选没反应"）
+            FileLogger.w(
+                XimeInputMethodService.TAG,
+                "selectCandidateAsync: engine rejected index=$index text=$selectedCandidate, refresh UI",
+            )
+            service.updateUI()
+            return
+        }
 
         // T9：跳过 service.rimeEngine.commit()，用用户点选的 selectedCandidate 作为权威上屏文本。
         val committedText = if (isT9) "" else service.rimeEngine.commit()
