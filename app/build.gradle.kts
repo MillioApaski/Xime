@@ -51,8 +51,8 @@ android {
         applicationId = "com.kingzcheung.xime"
         minSdk = 28
         targetSdk = 35
-        versionCode = 20261011
-        versionName = "3.1.0"
+        versionCode = 20261013
+        versionName = "3.2.0"
 
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -194,7 +194,7 @@ dependencies {
     implementation(libs.material)
 
     // Kotlin stdlib - CRITICAL for plugin compatibility
-    implementation("org.jetbrains.kotlin:kotlin-stdlib:2.4.20")
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:2.4.21")
     implementation(libs.kotlinx.coroutines.core)
 
     // Jetpack Compose

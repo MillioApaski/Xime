@@ -4,9 +4,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -49,27 +46,20 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.kingzcheung.xime.clipboard.ClipboardDragSender
 import com.kingzcheung.xime.clipboard.ClipboardItem
@@ -77,6 +67,7 @@ import com.kingzcheung.xime.clipboard.clipboardLongPressDrag
 import com.kingzcheung.xime.ui.CLIPBOARD_CARD_MAX_PX
 import com.kingzcheung.xime.ui.rememberClipboardImageRequest
 import com.kingzcheung.xime.ui.keyboard.WIDE_CONTAINER_WIDTH
+import com.kingzcheung.xime.ui.keyboard.tolerantClick
 import com.kingzcheung.xime.viewmodel.KeyboardViewModel
 import java.io.File
 import kotlin.math.max
@@ -102,7 +93,7 @@ fun ClipboardView(
     pullRemoteAvailable: Boolean = false,
     /** 图片条目点选（直插/回写由服务层处理）。 */
     onSelectImage: ((ClipboardItem) -> Unit)? = null,
-    /** 图片条目 → 本地绝对文件（不存在返回 null，用于缩略图与预览）。 */
+    /** 图片条目 → 本地绝对文件（不存在返回 null，用于缩略图与拖拽）。 */
     imageFileOf: ((ClipboardItem) -> File?)? = null,
     /** 拖拽发送已成功启动（收起输入法，露出目标应用的接收区域）。 */
     onDragSendStarted: (() -> Unit)? = null,
@@ -122,8 +113,6 @@ fun ClipboardView(
     var isMultiSelect by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var showClearConfirm by remember { mutableStateOf(false) }
-    // 图片全屏预览（点击关闭/双指缩放）
-    var previewItem by remember { mutableStateOf<ClipboardItem?>(null) }
 
     fun exitMultiSelect() {
         isMultiSelect = false
@@ -332,7 +321,6 @@ fun ClipboardView(
                     },
                     onExitMultiSelect = { exitMultiSelect() },
                     onSelectImage = onSelectImage,
-                    onPreviewImage = { item -> previewItem = item },
                     imageFileOf = imageFileOf,
                     onDragSendStarted = onDragSendStarted,
                 )
@@ -407,13 +395,8 @@ fun ClipboardView(
         menuAnchor?.let { anchor ->
             val menuItems = if (anchor.tab == 0) {
                 if (anchor.item.isImage) {
-                    // 图片条目：拆词/快捷发送无意义（文本操作），改为预览 + 多选 + 删除
+                    // 图片条目：拆词/快捷发送无意义（文本操作），只剩多选 + 删除
                     listOf(
-                        LongPressMenuEntry(
-                            icon = Icons.TwoTone.Image,
-                            label = "预览",
-                            onClick = { previewItem = anchor.item }
-                        ),
                         LongPressMenuEntry(
                             icon = Icons.Default.DoneAll,
                             label = "多选",
@@ -502,13 +485,6 @@ fun ClipboardView(
                 onDismiss = { menuAnchor = null },
                 menuItems = menuItems
             )
-        }
-
-        previewItem?.let { item ->
-            // 文件可能已被配额淘汰/手动清理：拿不到则静默不弹（不在组合期改写状态）
-            imageFileOf?.invoke(item)?.let { file ->
-                ClipboardImagePreviewDialog(file = file, onDismiss = { previewItem = null })
-            }
         }
 
         if (showClearConfirm) {
@@ -636,7 +612,6 @@ fun ClipboardTabContent(
     onToggleSelect: (Long) -> Unit = {},
     onExitMultiSelect: () -> Unit = {},
     onSelectImage: ((ClipboardItem) -> Unit)? = null,
-    onPreviewImage: ((ClipboardItem) -> Unit)? = null,
     imageFileOf: ((ClipboardItem) -> File?)? = null,
     onDragSendStarted: (() -> Unit)? = null,
 ) {
@@ -697,7 +672,6 @@ fun ClipboardTabContent(
                         modifier = Modifier.height(62.dp),
                         onClick = onClick,
                         onLongClick = onLongClick,
-                        onPreviewClick = { onPreviewImage?.invoke(item) },
                         dragKey = item.id,
                         onStartDrag = onStartDrag,
                     )
@@ -743,7 +717,6 @@ fun ClipboardImageCard(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
-    onPreviewClick: (() -> Unit)? = null,
     dragKey: Any? = null,
     onStartDrag: (() -> Boolean)? = null,
 ) {
@@ -755,11 +728,12 @@ fun ClipboardImageCard(
             .clip(shape)
             .background(bg)
             // 长按/拖拽由 clipboardLongPressDrag 处理（长按未拖 → onLongClick 弹菜单）。
-            // onLongClick 必须传空回调：foundation 不传回调时长按计时器不启动、
-            // longPressTriggered 恒 false，抬起会被误 dispatch 成 onClick（上屏）
-            .combinedClickable(onClick = onClick, onLongClick = {})
-            // 拖拽手势必须放在 combinedClickable 之后（更内层）：Main pass 内层先收，
-            // combinedClickable 长按触发后会消费后续事件，外层收到的位移恒为 Zero
+            // 用 tolerantClick 而非 combinedClickable：卡片位于 LazyVerticalGrid + HorizontalPager 内，
+            // 轻点的小位移会被父级手势判定吃掉（部分 ROM/高采样屏幕表现为“点了没反应”）。
+            // onLongClick 仍须传空回调：长按触发后抬起不再 dispatch onClick，避免误上屏
+            .tolerantClick(onClick = onClick, onLongClick = {})
+            // 拖拽手势必须放在点击手势之后（更内层）：Main pass 内层先收，
+            // 长按触发后外层点击手势会消费后续事件，外层收到的位移恒为 Zero
             .clipboardLongPressDrag(
                 key = dragKey,
                 enabled = onStartDrag != null,
@@ -775,23 +749,6 @@ fun ClipboardImageCard(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
-            // 右下角图片角标：与文本卡片区分，同时提示可点开大图
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(4.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color.Black.copy(alpha = 0.45f))
-                    .clickable(enabled = onPreviewClick != null) { onPreviewClick?.invoke() }
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.TwoTone.Image,
-                    contentDescription = "预览图片",
-                    tint = Color.White,
-                    modifier = Modifier.size(12.dp)
-                )
-            }
         } else {
             Column(
                 modifier = Modifier
@@ -819,50 +776,6 @@ fun ClipboardImageCard(
     }
 }
 
-/** 全屏图片预览：点击/返回关闭，支持双指缩放与拖动（同设置页截图预览范式）。 */
-@Composable
-fun ClipboardImagePreviewDialog(file: File, onDismiss: () -> Unit) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        var scale by remember { mutableFloatStateOf(1f) }
-        var offset by remember { mutableStateOf(Offset.Zero) }
-        val transformState = rememberTransformableState { zoomChange, panChange, _ ->
-            scale = (scale * zoomChange).coerceIn(1f, 5f)
-            offset = if (scale > 1f) offset + panChange else Offset.Zero
-        }
-        // 预览按屏幕尺寸解码（放大后仍清晰），但仍显式给上限——
-        // 弹窗一旦出现无界约束，Coil 会退回按原图解码（4096² ≈ 64MB），这是最危险的场景
-        val configuration = LocalConfiguration.current
-        val density = LocalDensity.current
-        val screenWidthPx = with(density) { configuration.screenWidthDp.dp.roundToPx() }
-        val screenHeightPx = with(density) { configuration.screenHeightDp.dp.roundToPx() }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-                .clickable(onClick = onDismiss),
-            contentAlignment = Alignment.Center
-        ) {
-            AsyncImage(
-                model = rememberClipboardImageRequest(file, screenWidthPx, screenHeightPx),
-                contentDescription = "图片预览",
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer(
-                        scaleX = scale,
-                        scaleY = scale,
-                        translationX = offset.x,
-                        translationY = offset.y,
-                    )
-                    .transformable(transformState)
-            )
-        }
-    }
-}
-
 @Composable
 fun GridItemCard(
     text: String,
@@ -884,11 +797,12 @@ fun GridItemCard(
             .clip(shape)
             .background(bg)
             // 长按/拖拽由 clipboardLongPressDrag 处理（长按未拖 → onLongClick 弹菜单）。
-            // onLongClick 必须传空回调：foundation 不传回调时长按计时器不启动、
-            // longPressTriggered 恒 false，抬起会被误 dispatch 成 onClick（上屏）
-            .combinedClickable(onClick = onClick, onLongClick = {})
-            // 拖拽手势必须放在 combinedClickable 之后（更内层）：Main pass 内层先收，
-            // combinedClickable 长按触发后会消费后续事件，外层收到的位移恒为 Zero
+            // 用 tolerantClick 而非 combinedClickable：卡片位于 LazyVerticalGrid + HorizontalPager 内，
+            // 轻点的小位移会被父级手势判定吃掉（部分 ROM/高采样屏幕表现为“点了没反应”）。
+            // onLongClick 仍须传空回调：长按触发后抬起不再 dispatch onClick，避免误上屏
+            .tolerantClick(onClick = onClick, onLongClick = {})
+            // 拖拽手势必须放在点击手势之后（更内层）：Main pass 内层先收，
+            // 长按触发后外层点击手势会消费后续事件，外层收到的位移恒为 Zero
             .clipboardLongPressDrag(
                 key = dragKey,
                 enabled = onStartDrag != null,

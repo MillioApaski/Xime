@@ -436,6 +436,10 @@ fun KeyboardView(
                     if (item is ToolbarButtonItem.Builtin && item.button == ToolbarButton.HANDWRITING_LOOKUP) {
                         if (!com.kingzcheung.xime.handwriting.HandwritingEngine.hasModel(LocalContext.current)) return@mapNotNull null
                     }
+                    // 语音转文本开关关闭时隐藏工具栏语音按钮
+                    if (item is ToolbarButtonItem.Builtin && item.button == ToolbarButton.VOICE && !state.isSttEnabled) {
+                        return@mapNotNull null
+                    }
                     val toolbarContext = LocalContext.current
                     val onClick: () -> Unit = when (item) {
                         is ToolbarButtonItem.Builtin -> when (item.button) {
@@ -905,6 +909,8 @@ fun KeyboardView(
                                     ))
                                 }
                                 "emoji" -> viewModel.showOverlay(OverlayRoute.Emoji)
+                                // 与 emoji 同档：command: symbol / 自定义键发 "symbol" 时打开符号面板
+                                "symbol" -> viewModel.showOverlay(OverlayRoute.Symbol)
                                 else -> {
                                     callbacks.onKeyPress(key, isShifted)
                                     viewModel.onCharacterTyped()

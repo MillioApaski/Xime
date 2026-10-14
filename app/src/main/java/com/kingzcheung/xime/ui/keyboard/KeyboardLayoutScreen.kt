@@ -85,6 +85,9 @@ fun KeyboardLayoutScreen(
             // 面板切换映射的唯一实现（三处 UI 手势入口共用，含 clipboard）
             GestureAction.SWITCH_ROUTE -> switchRouteOverlay(value)?.let { viewModel.showOverlay(it) }
 
+            // command 的值统一走按键路由（tap/上滑与手势分发同一条解析；命令名白名单见 dispatchCommandAction）
+            GestureAction.COMMAND -> dispatchCommandAction(value, onKeyPress)
+
             GestureAction.TOGGLE_ASCII -> {
                 FileLogger.i("XimeKeyboard", "earth key toggle_ascii tapped, ui ascii=${uiState.isAsciiMode}")
                 viewModel.resetShift()

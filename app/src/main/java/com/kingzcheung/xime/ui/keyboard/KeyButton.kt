@@ -317,9 +317,10 @@ fun KeyButton(
                                         onSwipeStateChange?.invoke(SwipeState(shouldShowBubble, swipeText, false))
                                     }
                                     
-                                    if (dragOffsetY < swipeUpThreshold && !hasTriggeredSwipeUp && swipeText != null && onSwipe != null) {
+                                    // 触发只看回调绑定，不依赖提示文本（与 SwipeableKeyButton 同规则）
+                                    if (dragOffsetY < swipeUpThreshold && !hasTriggeredSwipeUp && onSwipe != null) {
                                         hasTriggeredSwipeUp = true
-                                        onSwipe(swipeText)
+                                        onSwipe(swipeText ?: "")
                                     }
                                 }
                             } else if (dragOffsetY > 0) {
@@ -331,9 +332,10 @@ fun KeyButton(
                                         onSwipeStateChange?.invoke(SwipeState(shouldShowBubble, swipeDownText, true))
                                     }
                                     
-                                    if (dragOffsetY > swipeDownThreshold && !hasTriggeredSwipeDown && swipeDownText != null && onSwipeDown != null) {
+                                    // 触发只看回调绑定，不依赖提示文本（与 SwipeableKeyButton 同规则）
+                                    if (dragOffsetY > swipeDownThreshold && !hasTriggeredSwipeDown && onSwipeDown != null) {
                                         hasTriggeredSwipeDown = true
-                                        onSwipeDown(swipeDownText)
+                                        onSwipeDown(swipeDownText ?: "")
                                     }
                                 }
                             }
@@ -1205,6 +1207,10 @@ fun SwipeableIconKeyButton(
     swipeText: String? = null,
     onSwipe: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
+    /** 长按气泡项；非空时接管长按（气泡滑动选择），[onLongClick] / [repeatLongPress] 不再生效。 */
+    longPressItems: List<String>? = null,
+    longPressDrawableIds: List<Int> = emptyList(),
+    onLongPressSelect: ((String) -> Unit)? = null,
     onPress: (() -> Unit)? = null,
     onRelease: (() -> Unit)? = null,
     // 上滑/下滑/左滑增强
@@ -1215,6 +1221,11 @@ fun SwipeableIconKeyButton(
     onSwipeLeft: (() -> Unit)? = null,
     /** 右滑动作；与 [onSwipeLeft] 任一配置后，该键横向滑动即接管，自动放弃父层光标手势。 */
     onSwipeRight: (() -> Unit)? = null,
+    /**
+     * 长按是否连发（每 30ms 重复）。删除键为 true（长按连删）；
+     * 普通功能键传 false（长按只触发一次，避免重复打开面板/切换状态）。
+     */
+    repeatLongPress: Boolean = true,
     onSwipeStateChange: ((SwipeState, Rect) -> Unit)? = null,
     shadowEnabled: Boolean = true,
     shadowElevation: Dp = 1.dp,
@@ -1245,6 +1256,11 @@ fun SwipeableIconKeyButton(
     val currentOnRelease by rememberUpdatedState(onRelease)
     val currentOnSwipeLeft by rememberUpdatedState(onSwipeLeft)
     val currentOnSwipeRight by rememberUpdatedState(onSwipeRight)
+    val currentOnLongPressSelect by rememberUpdatedState(onLongPressSelect)
+    val currentLongPressItems by rememberUpdatedState(longPressItems)
+    val currentLongPressDrawableIds by rememberUpdatedState(longPressDrawableIds)
+    val scope = rememberCoroutineScope()
+    val view = LocalView.current
     val keyLabelFontFamily = AppFonts.keyLabelFontFamily
     
     val density = LocalDensity.current
@@ -1268,14 +1284,17 @@ fun SwipeableIconKeyButton(
     // 消除 30~60dp 位移区间"点击被取消但光标手势未激活"的死区（打字吃键）。
     val horizontalClickCancelThreshold = with(density) { 60.dp.toPx() }
     
-    LaunchedEffect(isLongPress) {
+    LaunchedEffect(isLongPress, repeatLongPress) {
         if (isLongPress && onLongClick != null) {
             hasTriggeredLongPress = true
-            while (isLongPress) {
-                onLongClick()
-                // 长按重复间隔 30ms：80ms 时退格删除以 12.5Hz 离散更新
-                // 候选栏，低于视觉融合阈值，看起来像"一闪一闪"；30ms 时更新更密集更顺滑。
-                delay(30)
+            onLongClick()
+            if (repeatLongPress) {
+                while (isLongPress) {
+                    // 长按重复间隔 30ms：80ms 时退格删除以 12.5Hz 离散更新
+                    // 候选栏，低于视觉融合阈值，看起来像"一闪一闪"；30ms 时更新更密集更顺滑。
+                    delay(30)
+                    onLongClick()
+                }
             }
         }
     }
@@ -1335,7 +1354,8 @@ fun SwipeableIconKeyButton(
                         hasTriggeredLongPress = false
                     },
                     onLongPress = {
-                        isLongPress = true
+                        // 配了长按气泡项时由下方的气泡选择手势接管，避免连发长按
+                        if (currentLongPressItems.isNullOrEmpty()) isLongPress = true
                     }
                 )
             }
@@ -1494,6 +1514,86 @@ fun SwipeableIconKeyButton(
                         }
                     }
                 )
+            }
+            // 长按气泡滑动选择（配置了 longPressItems 时生效）。必须放在拖拽手势之后（更内层）：
+            // Main pass 内层先收，长按期间消费掉位移，滑动/点击不会再被激活。
+            // 短按不消费事件，仍由点击/拖拽块处理，避免重复触发。
+            .pointerInput(currentLongPressItems.isNullOrEmpty()) {
+                if (currentLongPressItems.isNullOrEmpty()) return@pointerInput
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    var localLongPressTriggered = false
+                    var selectedIdx = 0
+                    val downX = down.position.x
+                    val downY = down.position.y
+                    val items = currentLongPressItems ?: return@awaitEachGesture
+
+                    val longPressJob = scope.launch {
+                        delay(400L)
+                        localLongPressTriggered = true
+                        view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                        onSwipeStateChange?.invoke(
+                            SwipeState(
+                                isPressed = true,
+                                isLongPress = true,
+                                longPressItems = items,
+                                selectedLongPressIndex = 0,
+                                longPressDrawableIds = currentLongPressDrawableIds,
+                            ),
+                            buttonBounds,
+                        )
+                    }
+
+                    val cancelThresholdPx = with(density) { 5.dp.toPx() }
+                    try {
+                        var lastReportedIdx = -1
+                        var completed = false
+                        while (!completed) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull() ?: break
+                            val isRelease =
+                                event.type == androidx.compose.ui.input.pointer.PointerEventType.Release
+
+                            if (!localLongPressTriggered) {
+                                val deltaX = change.position.x - downX
+                                val deltaY = change.position.y - downY
+                                if (kotlin.math.abs(deltaX) > cancelThresholdPx ||
+                                    kotlin.math.abs(deltaY) > cancelThresholdPx
+                                ) {
+                                    longPressJob.cancel()
+                                }
+                                if (isRelease) completed = true
+                                continue
+                            }
+
+                            val deltaX = change.position.x - downX
+                            val itemWidth = buttonBounds.width / items.size
+                            selectedIdx = ((deltaX / itemWidth) + if (items.size > 1) 0.5f else 0f)
+                                .toInt().coerceIn(0, items.size - 1)
+                            if (!isRelease && selectedIdx != lastReportedIdx) {
+                                lastReportedIdx = selectedIdx
+                                onSwipeStateChange?.invoke(
+                                    SwipeState(
+                                        isPressed = true,
+                                        isLongPress = true,
+                                        longPressItems = items,
+                                        selectedLongPressIndex = selectedIdx,
+                                        longPressDrawableIds = currentLongPressDrawableIds,
+                                    ),
+                                    buttonBounds,
+                                )
+                            }
+                            change.consume()
+                            if (isRelease) {
+                                completed = true
+                                items.getOrNull(selectedIdx)?.let { currentOnLongPressSelect?.invoke(it) }
+                            }
+                        }
+                    } finally {
+                        longPressJob.cancel()
+                        onSwipeStateChange?.invoke(SwipeState(), buttonBounds)
+                    }
+                }
             }
             .onGloballyPositioned { coordinates ->
                 buttonBounds = coordinates.boundsInRoot()
