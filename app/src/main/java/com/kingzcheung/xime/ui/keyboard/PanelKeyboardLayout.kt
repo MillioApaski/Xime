@@ -138,7 +138,7 @@ fun PanelKeyboardLayout(
         onKeyPressDown = onKeyPressDown,
         onKeyRelease = null,
         onCommitText = callbacks.onCommitText,
-        onGestureAction = buildUiGestureHandler(viewModel, callbacks, uiState, requestVoice = null),
+        onGestureAction = buildUiGestureHandler(viewModel, callbacks, uiState, requestVoice = null, onKeyPress = onKeyPress),
         onVoiceModeChange = null,
         isSttEnabled = false,
         isVoiceMode = false,

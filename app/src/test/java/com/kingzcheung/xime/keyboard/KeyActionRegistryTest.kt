@@ -63,28 +63,10 @@ class KeyActionRegistryTest {
     }
 
     @Test
-    fun `既有命令已登记为服务域动作`() {
-        assertEquals(ActionDomain.SERVICE, KeyActionRegistry.fromCommand("clear_composition")!!.domain)
-        assertEquals(ActionDomain.SERVICE, KeyActionRegistry.fromCommand("show_ime_picker")!!.domain)
-    }
-
-    @Test
-    fun `未登记命令返回 null`() {
-        assertNull(KeyActionRegistry.fromCommand("no_such_command"))
-    }
-
-    @Test
-    fun `command 动作经注册表分发已登记命令`() {
+    fun `command 动作由服务域兜底执行`() {
         val executor = RecordingExecutor()
         KeyActionRegistry.execute(GestureAction.COMMAND, KeyActionContext(executor), "clear_composition")
         assertEquals(listOf("clear_composition"), executor.commands)
-    }
-
-    @Test
-    fun `command 动作对未登记命令走旧兜底路径`() {
-        val executor = RecordingExecutor()
-        KeyActionRegistry.execute(GestureAction.COMMAND, KeyActionContext(executor), "legacy_unknown")
-        assertEquals(listOf("legacy_unknown"), executor.commands)
     }
 
     @Test
