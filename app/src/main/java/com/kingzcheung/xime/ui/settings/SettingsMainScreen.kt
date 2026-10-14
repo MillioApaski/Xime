@@ -328,7 +328,7 @@ fun SettingsMainContent(
                     )
                     SettingsItem(
                         icon = Icons.TwoTone.AutoFixHigh,
-                        title = "智能纠错",
+                        title = "智能纠错（实验性）",
                         subtitle = "按错相邻键时给出纠正候选",
                         onClick = onNavigateToCorrection,
                         showArrow = true

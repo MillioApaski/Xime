@@ -88,6 +88,18 @@ fun CorrectionSettingsContent(onBack: () -> Unit) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
+                            text = "• ⚠️⚠️⚠️警告1：此功能实验性质，只对默认布局、开发者自己使用习惯做了训练，不承诺所有用户可用。",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        Text(
+                            text = "• ⚠️⚠️⚠️警告2：不支持任何自定义按键布局的键位纠错。",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        Text(
                             text = "• 纠正候选标注「纠错」，排在原有候选之后（不抢占正常候选），点选即上屏纠正后的词。",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
