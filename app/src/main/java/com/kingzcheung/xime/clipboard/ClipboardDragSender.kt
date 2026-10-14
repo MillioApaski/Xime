@@ -19,11 +19,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import java.io.File
@@ -90,13 +92,13 @@ object ClipboardDragSender {
 /**
  * 剪贴板条目的"长按菜单 / 拖拽发送"二分手势（issue #1062 语义）。
  *
- * **必须放在 combinedClickable 之后（链上更靠后 = 更内层）**：Main pass 从内向外
- * 分发，combinedClickable 在长按触发后会消费后续所有事件（foundation
- * Clickable.kt 的 longPressTriggered 分支），若本手势在其外层收到的 move 全是
- * 已消费的（positionChange 恒为 Zero），拖拽位移永远累计不起来。
+ * **必须放在点击手势之后（链上更靠后 = 更内层）**：Main pass 从内向外分发，
+ * 外层点击手势在长按触发后会消费后续所有事件（foundation Clickable.kt 的
+ * longPressTriggered 分支），若本手势在其外层收到的 move 全是已消费的
+ * （positionChange 恒为 Zero），拖拽位移永远累计不起来。
  *
  * 语义：
- * - 长按窗口内快速抬起 → 点击（由并存的 combinedClickable 处理）
+ * - 长按窗口内快速抬起 → 点击（由并存的 tolerantClick 处理）
  * - 长按窗口内被父层手势接管（列表滚动/翻页消费事件，Final pass 复检）→ 取消
  * - 长按达成后抬起未拖 → [onLongPress]（现有长按菜单）
  * - 长按达成后拖出 [DRAG_START_THRESHOLD_DP] → [onStartDrag]（返回 true = 系统接管，
@@ -104,9 +106,9 @@ object ClipboardDragSender {
  *   状态影响。达成后本手势消费 move（内层先手），父层滚动不会抢走拖拽
  * - [onStartDrag] 返回 false → 保持待拖态不再重试，抬起仍弹菜单（降级）
  *
- * 长按触觉反馈由并存的 combinedClickable 提供（其 onLongClick 需传空回调：
- * foundation 不传 onLongClick 时长按计时器不启动、抬起会误触发点击，见
- * ClipboardView 调用处）。
+ * 长按触觉反馈由本手势在长按达成时发出（并存的容错点击手势不负责触觉）；
+ * 并存的点击手势需传空 onLongClick：不传时长按计时器不启动、抬起会被
+ * 误 dispatch 成 onClick，见 ClipboardView 调用处。
  * [enabled] 为 false（多选态）时整个手势不生效。
  */
 fun Modifier.clipboardLongPressDrag(
@@ -117,6 +119,8 @@ fun Modifier.clipboardLongPressDrag(
 ): Modifier = composed {
     val currentOnLongPress by rememberUpdatedState(onLongPress)
     val currentOnStartDrag by rememberUpdatedState(onStartDrag)
+    // 长按触觉：并存的点击手势用 tolerantClick（不发触觉），改由本手势在长按达成时发
+    val hapticFeedback = LocalHapticFeedback.current
     val dragThresholdPx = with(LocalDensity.current) { DRAG_START_THRESHOLD_DP.dp.toPx() }
     pointerInput(key, enabled) {
         if (!enabled) return@pointerInput
@@ -125,7 +129,7 @@ fun Modifier.clipboardLongPressDrag(
             // ── 阶段 1：长按窗口（对齐官方 waitForLongPress 语义）──
             // 抬起 = 点击路径；被父层手势接管（滚动/翻页，Final 复检可见）= 取消；
             // 移动不取消；深按压提前达成（对齐系统长按）；超时 = 长按达成。
-            // Final 复检跳过 down 帧：combinedClickable（外层）的正常流程会消费 down。
+            // Final 复检跳过 down 帧：避免把 down 帧上的正常消费误判为父层接管。
             var longPressAchieved = false
             try {
                 withTimeout(viewConfiguration.longPressTimeoutMillis) {
@@ -148,7 +152,8 @@ fun Modifier.clipboardLongPressDrag(
                 longPressAchieved = true
             }
             if (!longPressAchieved) return@awaitEachGesture
-            // 长按触觉反馈由 combinedClickable 的空 onLongClick 路径发（与本手势超时同步）
+            // 长按达成：发触觉反馈（与本手势超时同步）
+            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
             // ── 阶段 2：待拖拽。抬起 = 菜单；拖出阈值 = 拖拽 ──
             // 本手势（内层）先收并消费 move，父层滚动无法接管，无需消费检测；
             // 位移用绝对位置差，与 combinedClickable 的事件消费解耦

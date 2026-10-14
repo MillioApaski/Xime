@@ -4,7 +4,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -68,6 +67,7 @@ import com.kingzcheung.xime.clipboard.clipboardLongPressDrag
 import com.kingzcheung.xime.ui.CLIPBOARD_CARD_MAX_PX
 import com.kingzcheung.xime.ui.rememberClipboardImageRequest
 import com.kingzcheung.xime.ui.keyboard.WIDE_CONTAINER_WIDTH
+import com.kingzcheung.xime.ui.keyboard.tolerantClick
 import com.kingzcheung.xime.viewmodel.KeyboardViewModel
 import java.io.File
 import kotlin.math.max
@@ -728,11 +728,12 @@ fun ClipboardImageCard(
             .clip(shape)
             .background(bg)
             // 长按/拖拽由 clipboardLongPressDrag 处理（长按未拖 → onLongClick 弹菜单）。
-            // onLongClick 必须传空回调：foundation 不传回调时长按计时器不启动、
-            // longPressTriggered 恒 false，抬起会被误 dispatch 成 onClick（上屏）
-            .combinedClickable(onClick = onClick, onLongClick = {})
-            // 拖拽手势必须放在 combinedClickable 之后（更内层）：Main pass 内层先收，
-            // combinedClickable 长按触发后会消费后续事件，外层收到的位移恒为 Zero
+            // 用 tolerantClick 而非 combinedClickable：卡片位于 LazyVerticalGrid + HorizontalPager 内，
+            // 轻点的小位移会被父级手势判定吃掉（部分 ROM/高采样屏幕表现为“点了没反应”）。
+            // onLongClick 仍须传空回调：长按触发后抬起不再 dispatch onClick，避免误上屏
+            .tolerantClick(onClick = onClick, onLongClick = {})
+            // 拖拽手势必须放在点击手势之后（更内层）：Main pass 内层先收，
+            // 长按触发后外层点击手势会消费后续事件，外层收到的位移恒为 Zero
             .clipboardLongPressDrag(
                 key = dragKey,
                 enabled = onStartDrag != null,
@@ -796,11 +797,12 @@ fun GridItemCard(
             .clip(shape)
             .background(bg)
             // 长按/拖拽由 clipboardLongPressDrag 处理（长按未拖 → onLongClick 弹菜单）。
-            // onLongClick 必须传空回调：foundation 不传回调时长按计时器不启动、
-            // longPressTriggered 恒 false，抬起会被误 dispatch 成 onClick（上屏）
-            .combinedClickable(onClick = onClick, onLongClick = {})
-            // 拖拽手势必须放在 combinedClickable 之后（更内层）：Main pass 内层先收，
-            // combinedClickable 长按触发后会消费后续事件，外层收到的位移恒为 Zero
+            // 用 tolerantClick 而非 combinedClickable：卡片位于 LazyVerticalGrid + HorizontalPager 内，
+            // 轻点的小位移会被父级手势判定吃掉（部分 ROM/高采样屏幕表现为“点了没反应”）。
+            // onLongClick 仍须传空回调：长按触发后抬起不再 dispatch onClick，避免误上屏
+            .tolerantClick(onClick = onClick, onLongClick = {})
+            // 拖拽手势必须放在点击手势之后（更内层）：Main pass 内层先收，
+            // 长按触发后外层点击手势会消费后续事件，外层收到的位移恒为 Zero
             .clipboardLongPressDrag(
                 key = dragKey,
                 enabled = onStartDrag != null,
