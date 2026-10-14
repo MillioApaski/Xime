@@ -909,6 +909,8 @@ fun KeyboardView(
                                     ))
                                 }
                                 "emoji" -> viewModel.showOverlay(OverlayRoute.Emoji)
+                                // 与 emoji 同档：command: symbol / 自定义键发 "symbol" 时打开符号面板
+                                "symbol" -> viewModel.showOverlay(OverlayRoute.Symbol)
                                 else -> {
                                     callbacks.onKeyPress(key, isShifted)
                                     viewModel.onCharacterTyped()

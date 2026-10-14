@@ -55,6 +55,7 @@ import com.kingzcheung.xime.ui.isTablet
 import com.kingzcheung.xime.settings.DisplayMode
 import com.kingzcheung.xime.settings.ButtonLayout
 import com.kingzcheung.xime.settings.KeyAction
+import com.kingzcheung.xime.settings.KeyBinding
 import com.kingzcheung.xime.settings.KeyboardKeyConfig
 import com.kingzcheung.xime.settings.KeysConfigHelper
 import com.kingzcheung.xime.keyboard.GestureAction
@@ -175,7 +176,7 @@ fun KeyboardLayout(
             }
         }
     }
-    val onGestureAction = buildUiGestureHandler(viewModel, callbacks, uiState, requestVoice)
+    val onGestureAction = buildUiGestureHandler(viewModel, callbacks, uiState, requestVoice, onKeyPress)
     val suppressCursorMove = LocalSuppressCursorMove.current
     var landscapeSplitKeyboardEnabled by remember {
         mutableStateOf(SettingsPreferences.isLandscapeSplitKeyboardEnabled(context))
@@ -408,7 +409,8 @@ fun KeyboardLayout(
  *
  * 分发约定：
  * - COMMIT → 直接上屏（[onCommitText] 优先，回退 [onKeyPress]）
- * - SEND_RIME / COMMAND → 走 [onKeyPress] 的字符串路由（UI 面板切换与 rime 通用键均在其内）
+ * - SEND_RIME → 走 [onKeyPress] 的字符串路由（UI 面板切换与 rime 通用键均在其内）
+ * - COMMAND → [dispatchCommandAction]（命令名白名单 → 同一条按键路由；未登记的名字不上屏）
  * - 其余动作（编辑/删除/回车/空格/清空/面板切换等）→ [onGestureAction]（UI 拦截层 → 服务层）
  * - NONE / null → 不触发
  */
@@ -440,7 +442,8 @@ internal fun invokeKeyAction(
     val value = action.value.ifEmpty { action.label }
     when (type) {
         GestureAction.COMMIT -> (onCommitText ?: onKeyPress)(value)
-        GestureAction.SEND_RIME, GestureAction.COMMAND -> onKeyPress(value)
+        GestureAction.SEND_RIME -> onKeyPress(value)
+        GestureAction.COMMAND -> dispatchCommandAction(value, onKeyPress)
         GestureAction.NONE -> Unit
         else -> onGestureAction?.invoke(type, value)
     }
@@ -497,7 +500,8 @@ internal fun dispatchLongPressSelection(
  * 上滑手势处理器（26 键字母区标准/紧凑两套渲染共用）。
  *
  * - 未配置 swipe_up 且无旧默认表取值 → 返回 null（不检测上滑）；
- * - `action: none` → 视为未绑定，返回 null；
+ * - `action: none` → 生成空处理器「吸收」上滑（不上屏），与下滑/左右滑一致，
+ *   避免竖向拖拽被落点点击判定误打出一个字符；
  * - 其余交给 [dispatchKeyActionOrPress]（COMMIT/未配置 → 原有上滑上屏；其它动作 → 手势分发）。
  */
 internal fun swipeUpHandlerFor(
@@ -507,10 +511,58 @@ internal fun swipeUpHandlerFor(
     onCommitText: ((String) -> Unit)?,
     onGestureAction: ((GestureAction, String) -> Unit)?,
 ): ((String) -> Unit)? {
-    if (swipeUp?.action == GestureAction.NONE) return null
     if (swipeUp == null && commitValue == null) return null
     // 参数为按键组件回传的上滑提示文本（本处理器用不到，忽略）
     return { _: String -> dispatchKeyActionOrPress(swipeUp, commitValue, onKeyPress, onCommitText, onGestureAction) }
+}
+
+/**
+ * 功能键（enter / 面板键 / 光标键 / caps 等）的通用手势装配。
+ *
+ * 语义与字母键槽位一致：COMMIT → 上屏，其余（含 none 吸收）走 [invokeKeyAction]；
+ * 左右滑自动抑制父层光标手势；未配置的方向为 null（该方向不接管）。
+ */
+internal class FunctionKeyGestures(
+    val onUp: (() -> Unit)?,
+    val onDown: (() -> Unit)?,
+    val onLeft: (() -> Unit)?,
+    val onRight: (() -> Unit)?,
+)
+
+/** `SwipeableKeyButton` 的上滑/下滑回调带一个（被忽略的）提示文本参数。 */
+internal fun (() -> Unit)?.withSwipeTextArg(): ((String) -> Unit)? = this?.let { h -> { _: String -> h() } }
+
+internal fun functionKeyGestures(binding: KeyBinding?, env: QwertyRowEnv): FunctionKeyGestures =
+    functionKeyGestures(
+        swipeUp = binding?.swipeUp,
+        swipeDown = binding?.swipeDown,
+        swipeLeft = binding?.swipeLeft,
+        swipeRight = binding?.swipeRight,
+        onKeyPress = env.onKeyPress,
+        onCommitText = env.onCommitText,
+        onGestureAction = env.onGestureAction,
+        onHorizontalSwipe = { env.suppressCursorMove.value = true },
+    )
+
+/** [functionKeyGestures] 的无 Compose 依赖重载（便于单测）。 */
+internal fun functionKeyGestures(
+    swipeUp: KeyAction?,
+    swipeDown: KeyAction?,
+    swipeLeft: KeyAction?,
+    swipeRight: KeyAction?,
+    onKeyPress: (String) -> Unit,
+    onCommitText: ((String) -> Unit)?,
+    onGestureAction: ((GestureAction, String) -> Unit)?,
+    onHorizontalSwipe: () -> Unit,
+): FunctionKeyGestures {
+    fun slot(a: KeyAction?) = a?.takeIf { it.action != null }
+    fun invoke(a: KeyAction): () -> Unit = { invokeKeyAction(a, onKeyPress, onCommitText, onGestureAction) }
+    return FunctionKeyGestures(
+        onUp = slot(swipeUp)?.let { invoke(it) },
+        onDown = slot(swipeDown)?.let { invoke(it) },
+        onLeft = slot(swipeLeft)?.let { a -> { onHorizontalSwipe(); invoke(a)() } },
+        onRight = slot(swipeRight)?.let { a -> { onHorizontalSwipe(); invoke(a)() } },
+    )
 }
 
 /** 一行内的共享渲染参数（颜色/回调等），供行循环与功能键组件复用；主键盘与面板渲染共用。 */
@@ -662,10 +714,13 @@ internal fun buildUiGestureHandler(
     callbacks: KeyboardCallbacks,
     uiState: KeyboardUiState,
     requestVoice: (() -> Unit)?,
+    onKeyPress: (String) -> Unit,
 ): (GestureAction, String) -> Unit = { action, value ->
     when (action) {
         // 面板切换映射的唯一实现（三处 UI 手势入口共用，含 clipboard）
         GestureAction.SWITCH_ROUTE -> switchRouteOverlay(value)?.let { viewModel.showOverlay(it) }
+        // command 的值统一走按键路由（tap/上滑与手势分发同一条解析；命令名白名单见 dispatchCommandAction）
+        GestureAction.COMMAND -> dispatchCommandAction(value, onKeyPress)
         GestureAction.TOGGLE_ASCII -> {
             FileLogger.i("XimeKeyboard", "earth key toggle_ascii tapped, ui ascii=${uiState.isAsciiMode}")
             viewModel.resetShift()
@@ -852,11 +907,16 @@ private fun PanelActionCell(
     env: QwertyRowEnv,
     modifier: Modifier,
 ) {
-    val tap = KeysConfigHelper.getGestureFor(env.section, id, env.isAsciiMode)?.tap
+    val binding = KeysConfigHelper.getGestureFor(env.section, id, env.isAsciiMode)
+    val tap = binding?.tap
     val action = tap?.action ?: defaultAction
     val value = tap?.value?.takeIf { it.isNotEmpty() } ?: defaultValue
     val icon = tap?.icon?.takeIf { it.isNotEmpty() }?.let { panelKeyIcon(it) } ?: defaultIcon
-    IconKeyButton(
+    val gestures = functionKeyGestures(binding, env)
+    val longPressConfig = binding?.longPress
+    val longPressItems = longPressConfig?.let { KeysConfigHelper.longPressDisplayItems(it) }?.ifEmpty { null }
+    val longPressMap = longPressConfig?.let { KeysConfigHelper.longPressActionMap(it) }
+    SwipeableIconKeyButton(
         icon = icon,
         onClick = {
             invokeKeyAction(
@@ -867,6 +927,18 @@ private fun PanelActionCell(
         backgroundColor = env.specialKeyBackgroundColor,
         iconColor = env.specialKeyTextColor,
         modifier = modifier,
+        onSwipe = gestures.onUp,
+        onSwipeDown = gestures.onDown,
+        onSwipeLeft = gestures.onLeft,
+        onSwipeRight = gestures.onRight,
+        longPressItems = longPressItems,
+        onLongPressSelect = longPressItems?.let {
+            { label ->
+                dispatchLongPressSelection(
+                    label, longPressMap, env.onKeyPress, env.onCommitText, env.onGestureAction,
+                )
+            }
+        },
         a11yDescription = when (id) {
             "symbol" -> "符号"
             "emoji" -> "表情"
@@ -891,7 +963,8 @@ private fun PanelActionCell(
 @Composable
 private fun CursorMoveCell(direction: Int, env: QwertyRowEnv, modifier: Modifier) {
     val id = if (direction < 0) "cursor_left" else "cursor_right"
-    val tap = KeysConfigHelper.getKeyGesture(id, env.isAsciiMode)?.tap
+    val binding = KeysConfigHelper.getKeyGesture(id, env.isAsciiMode)
+    val tap = binding?.tap
     val action = tap?.action
         ?: if (direction < 0) GestureAction.CURSOR_LEFT else GestureAction.CURSOR_RIGHT
     val icon = tap?.icon?.takeIf { it.isNotEmpty() }?.let { panelKeyIcon(it) }
@@ -899,7 +972,11 @@ private fun CursorMoveCell(direction: Int, env: QwertyRowEnv, modifier: Modifier
             if (direction < 0) Icons.AutoMirrored.Filled.KeyboardArrowLeft
             else Icons.AutoMirrored.Filled.KeyboardArrowRight
         )
-    IconKeyButton(
+    val gestures = functionKeyGestures(binding, env)
+    val longPressConfig = binding?.longPress
+    val longPressItems = longPressConfig?.let { KeysConfigHelper.longPressDisplayItems(it) }?.ifEmpty { null }
+    val longPressMap = longPressConfig?.let { KeysConfigHelper.longPressActionMap(it) }
+    SwipeableIconKeyButton(
         icon = icon,
         onClick = {
             invokeKeyAction(
@@ -911,6 +988,18 @@ private fun CursorMoveCell(direction: Int, env: QwertyRowEnv, modifier: Modifier
         iconColor = env.specialKeyTextColor,
         modifier = modifier,
         a11yDescription = if (direction < 0) "光标左移" else "光标右移",
+        onSwipe = gestures.onUp,
+        onSwipeDown = gestures.onDown,
+        onSwipeLeft = gestures.onLeft,
+        onSwipeRight = gestures.onRight,
+        longPressItems = longPressItems,
+        onLongPressSelect = longPressItems?.let {
+            { label ->
+                dispatchLongPressSelection(
+                    label, longPressMap, env.onKeyPress, env.onCommitText, env.onGestureAction,
+                )
+            }
+        },
         onPress = { env.onKeyPressDown?.invoke(id) },
         onRelease = { env.onKeyRelease?.invoke(id) },
         shadowEnabled = env.shadowEnabled,
@@ -988,8 +1077,12 @@ private fun ShiftCell(env: QwertyRowEnv, modifier: Modifier, id: String = "shift
 private fun CapsCell(env: QwertyRowEnv, modifier: Modifier) {
     val capsBinding = KeysConfigHelper.getGestureFor(env.section, "caps", env.isAsciiMode)
     val capsTap = capsBinding?.tap
+    val capsGestures = functionKeyGestures(capsBinding, env)
+    val capsLongPressConfig = capsBinding?.longPress
+    val capsLongPressItems = capsLongPressConfig?.let { KeysConfigHelper.longPressDisplayItems(it) }?.ifEmpty { null }
+    val capsLongPressMap = capsLongPressConfig?.let { KeysConfigHelper.longPressActionMap(it) }
     val isCaps = env.shiftMode == ShiftMode.CAPS
-    IconKeyButton(
+    SwipeableIconKeyButton(
         icon = rememberVectorPainter(Icons.TwoTone.KeyboardCapslock),
         onClick = {
             if (capsTap != null) {
@@ -1004,6 +1097,18 @@ private fun CapsCell(env: QwertyRowEnv, modifier: Modifier) {
         isHighlighted = isCaps,
         a11yDescription = "大写锁定",
         a11yState = if (isCaps) "已锁定" else "未锁定",
+        onSwipe = capsGestures.onUp,
+        onSwipeDown = capsGestures.onDown,
+        onSwipeLeft = capsGestures.onLeft,
+        onSwipeRight = capsGestures.onRight,
+        longPressItems = capsLongPressItems,
+        onLongPressSelect = capsLongPressItems?.let {
+            { label ->
+                dispatchLongPressSelection(
+                    label, capsLongPressMap, env.onKeyPress, env.onCommitText, env.onGestureAction,
+                )
+            }
+        },
         onPress = { env.onKeyPressDown?.invoke("shift_caps") },
         onRelease = { env.onKeyRelease?.invoke("shift_caps") },
         shadowEnabled = env.shadowEnabled,
@@ -1021,14 +1126,19 @@ private fun SpaceCell(env: QwertyRowEnv, modifier: Modifier) {
     val onTap: (() -> Unit)? = if (spaceTap != null && spaceTap.action != GestureAction.SPACE) {
         { invokeKeyAction(spaceTap, env.onKeyPress, env.onCommitText, env.onGestureAction) }
     } else null
-    val onLongPress: (() -> Unit)? = spaceLong?.let { action ->
-        {
-            // 长按动作由 xime.yaml 配置（默认 action: voice）；语音转文本开关关闭时不触发语音
-            if (!shouldSkipVoiceKeyAction(action, env.isSttEnabled)) {
-                invokeKeyAction(action, env.onKeyPress, env.onCommitText, env.onGestureAction)
+    val spaceLongPressConfig = spaceBinding?.longPress
+    val spaceLongPressItems = spaceLongPressConfig?.let { KeysConfigHelper.longPressDisplayItems(it) }?.ifEmpty { null }
+    val spaceLongPressMap = spaceLongPressConfig?.let { KeysConfigHelper.longPressActionMap(it) }
+    val onLongPress: (() -> Unit)? = if (spaceLongPressItems == null) {
+        spaceLong?.let { action ->
+            {
+                // 长按动作由 xime.yaml 配置（默认 action: voice）；语音转文本开关关闭时不触发语音
+                if (!shouldSkipVoiceKeyAction(action, env.isSttEnabled)) {
+                    invokeKeyAction(action, env.onKeyPress, env.onCommitText, env.onGestureAction)
+                }
             }
         }
-    }
+    } else null
     val spaceUp = spaceBinding?.swipeUp
     val spaceDown = spaceBinding?.swipeDown
     val spaceLeft = spaceBinding?.swipeLeft
@@ -1068,6 +1178,15 @@ private fun SpaceCell(env: QwertyRowEnv, modifier: Modifier) {
         onTap = onTap,
         onLongPress = onLongPress,
         onSwipe = onSwipe,
+        longPressItems = spaceLongPressItems,
+        onLongPressSelect = spaceLongPressItems?.let {
+            { label ->
+                dispatchLongPressSelection(
+                    label, spaceLongPressMap, env.onKeyPress, env.onCommitText, env.onGestureAction,
+                )
+            }
+        },
+        onSwipeStateChange = { s, b -> env.processSwipeState(s, b) },
     )
 }
 
@@ -1076,18 +1195,34 @@ private fun EnterCell(env: QwertyRowEnv, modifier: Modifier, fontSize: TextUnit?
     val enterBinding = KeysConfigHelper.getGestureFor(env.section, "enter", env.isAsciiMode)
     val enterAction = enterBinding?.tap ?: KeyAction(GestureAction.ENTER)
     val enterKeyValue = enterAction.value.ifEmpty { "enter" }
-    KeyButton(
+    val enterGestures = functionKeyGestures(enterBinding, env)
+    val enterLongPressConfig = enterBinding?.longPress
+    val enterLongPressItems = enterLongPressConfig?.let { KeysConfigHelper.longPressDisplayItems(it) }?.ifEmpty { null }
+    val enterLongPressMap = enterLongPressConfig?.let { KeysConfigHelper.longPressActionMap(it) }
+    SwipeableKeyButton(
         text = enterAction.label.ifEmpty { env.enterKeyText },
         onClick = { invokeKeyAction(enterAction, env.onKeyPress, env.onCommitText, env.onGestureAction) },
         backgroundColor = env.specialKeyBackgroundColor,
         textColor = env.specialKeyTextColor,
         modifier = modifier,
+        onSwipe = enterGestures.onUp.withSwipeTextArg(),
+        onSwipeDown = enterGestures.onDown.withSwipeTextArg(),
+        onSwipeLeft = enterGestures.onLeft,
+        onSwipeRight = enterGestures.onRight,
+        longPressItems = enterLongPressItems,
+        onLongPressSelect = enterLongPressItems?.let {
+            { label ->
+                dispatchLongPressSelection(
+                    label, enterLongPressMap, env.onKeyPress, env.onCommitText, env.onGestureAction,
+                )
+            }
+        },
         onPress = { env.onKeyPressDown?.invoke(enterKeyValue) },
         onRelease = { env.onKeyRelease?.invoke(enterKeyValue) },
         shadowEnabled = env.shadowEnabled,
         shadowElevation = env.shadowElevation,
         shadowShapeRadius = env.shadowShapeRadius,
-        fontSize = fontSize,
+        fontSize = fontSize ?: androidx.compose.ui.unit.TextUnit.Unspecified,
     )
 }
 
@@ -1129,6 +1264,7 @@ private fun DeleteCell(env: QwertyRowEnv, modifier: Modifier) {
 @Composable
 private fun ModeChangeCell(env: QwertyRowEnv, modifier: Modifier) {
     val mcBinding = KeysConfigHelper.getGestureFor(env.section, "mode_change", env.isAsciiMode)
+    val mcGestures = functionKeyGestures(mcBinding, env)
     val mcTap = mcBinding?.tap
     val mcLongPressValues = mcBinding?.longPress?.values
     val mcLongPressItems = mcLongPressValues?.map { it.label }?.filter { it.isNotEmpty() }?.ifEmpty { null }
@@ -1159,6 +1295,10 @@ private fun ModeChangeCell(env: QwertyRowEnv, modifier: Modifier) {
             com.kingzcheung.xime.R.drawable.t9,
             com.kingzcheung.xime.R.drawable.t26
         ),
+        onSwipe = mcGestures.onUp.withSwipeTextArg(),
+        onSwipeDown = mcGestures.onDown.withSwipeTextArg(),
+        onSwipeLeft = mcGestures.onLeft,
+        onSwipeRight = mcGestures.onRight,
         onSwipeStateChange = { state, bounds -> env.processSwipeState(state, bounds) },
         shadowEnabled = env.shadowEnabled,
         shadowElevation = env.shadowElevation,
@@ -1169,6 +1309,7 @@ private fun ModeChangeCell(env: QwertyRowEnv, modifier: Modifier) {
 @Composable
 private fun CommaCell(env: QwertyRowEnv, modifier: Modifier) {
     val k2KeyGesture = KeysConfigHelper.getGestureFor(env.section, "comma", env.isAsciiMode)
+    val k2Gestures = functionKeyGestures(k2KeyGesture, env)
     val k2TapAction = k2KeyGesture?.tap?.action
     val k2TapValue = k2KeyGesture?.tap?.value?.takeIf { it.isNotEmpty() }
         ?: k2KeyGesture?.tap?.label?.takeIf { it.isNotEmpty() }
@@ -1232,7 +1373,8 @@ private fun CommaCell(env: QwertyRowEnv, modifier: Modifier) {
         }
     }
     if (k2TapAction == GestureAction.TOGGLE_ASCII) {
-        IconKeyButton(
+        // 图标形态：用可手势的图标键，避免「配了滑动但走 IconKeyButton 被丢弃」
+        SwipeableIconKeyButton(
             icon = rememberVectorPainter(Icons.Default.Language),
             onClick = k2OnClick,
             backgroundColor = env.keyBackgroundColor,
@@ -1240,6 +1382,10 @@ private fun CommaCell(env: QwertyRowEnv, modifier: Modifier) {
             modifier = modifier,
             a11yDescription = "中英切换",
             a11yState = if (env.isAsciiMode) "当前英文" else "当前中文",
+            onSwipe = k2Gestures.onUp,
+            onSwipeDown = k2Gestures.onDown,
+            onSwipeLeft = k2Gestures.onLeft,
+            onSwipeRight = k2Gestures.onRight,
             onPress = { env.onKeyPressDown?.invoke(k2TapValue) },
             onRelease = { env.onKeyRelease?.invoke(k2TapValue) },
             shadowEnabled = env.shadowEnabled,
@@ -1260,8 +1406,13 @@ private fun CommaCell(env: QwertyRowEnv, modifier: Modifier) {
             swipeDownText = k2SwipeDownText,
             swipeUpKeyLabel = k2SwipeUpKeyLabel,
             swipeDownKeyLabel = k2SwipeDownKeyLabel,
-            onSwipe = if (k2SwipeUpCommitValue != null) { { env.onKeyPress(k2SwipeUpCommitValue) } } else null,
+            // 上滑与字母键同一条分发：尊重配置的 action（COMMIT 沿用按键路由，其余走手势分发）
+            onSwipe = swipeUpHandlerFor(
+                k2SwipeUpRaw, k2SwipeUpCommitValue, env.onKeyPress, env.onCommitText, env.onGestureAction,
+            ),
             onSwipeDown = k2OnSwipeDown,
+            onSwipeLeft = k2Gestures.onLeft,
+            onSwipeRight = k2Gestures.onRight,
             onSwipeStateChange = { state, bounds -> env.processSwipeState(state, bounds) },
             onPress = { env.onKeyPressDown?.invoke(k2TapValue) },
             onRelease = { env.onKeyRelease?.invoke(k2TapValue) },
@@ -1277,6 +1428,7 @@ private fun CommaCell(env: QwertyRowEnv, modifier: Modifier) {
 @Composable
 private fun EarthCell(env: QwertyRowEnv, modifier: Modifier) {
     val k4KeyGesture = KeysConfigHelper.getGestureFor(env.section, "earth", env.isAsciiMode)
+    val k4Gestures = functionKeyGestures(k4KeyGesture, env)
     val k4TapAction = k4KeyGesture?.tap?.action
     val isEarthDefaultTap = k4KeyGesture?.tap == null
     val k4TapValue = k4KeyGesture?.tap?.value?.takeIf { it.isNotEmpty() } ?: "ime_switch"
@@ -1294,7 +1446,6 @@ private fun EarthCell(env: QwertyRowEnv, modifier: Modifier) {
         else (k4SwipeUpRaw?.label?.takeIf { it.isNotEmpty() } ?: k4SwipeUpRaw?.value?.takeIf { it.isNotEmpty() } ?: "")
     val k4SwipeUpValue = k4SwipeUpRaw?.value?.takeIf { it.isNotEmpty() }
         ?: k4SwipeUpRaw?.label?.takeIf { it.isNotEmpty() }
-    val k4SwipeUpAction = k4SwipeUpRaw?.action
     val k4SwipeUpDisplay = k4SwipeUpRaw?.display ?: DisplayMode.BOTH
     val k4SwipeUpBubble = k4SwipeUpRaw?.bubble ?: true
     val k4SwipeUpKeyLabel = if (k4SwipeUpDisplay == DisplayMode.BUBBLE) "" else k4SwipeUpLabel.takeIf { it.isNotEmpty() }
@@ -1324,9 +1475,10 @@ private fun EarthCell(env: QwertyRowEnv, modifier: Modifier) {
             }
         }
     }
-    val k4OnSwipe: ((String) -> Unit)? = if (k4SwipeUpValue != null && k4SwipeUpAction != GestureAction.NONE) {
-        remember(k4SwipeUpValue, env.onKeyPress) { { env.onKeyPress(k4SwipeUpValue) } }
-    } else null
+    // 上滑与字母键同一条分发：尊重配置的 action（COMMIT 沿用按键路由，其余走手势分发）
+    val k4OnSwipe: ((String) -> Unit)? = swipeUpHandlerFor(
+        k4SwipeUpRaw, k4SwipeUpValue, env.onKeyPress, env.onCommitText, env.onGestureAction,
+    )
     val k4OnSwipeDown: ((String) -> Unit)? = if (k4SwipeDownAction != null) {
         remember(k4SwipeDownAction, k4SwipeDownValue, k4SwipeDownLabel, env.onKeyPress, env.onGestureAction, env.onCommitText) {
             // 与字母区一致：下滑只写 action（无 label）也能触发；值取 value、其次 label；
@@ -1349,7 +1501,8 @@ private fun EarthCell(env: QwertyRowEnv, modifier: Modifier) {
         }
     }
     if ((k4TapAction == GestureAction.TOGGLE_ASCII && k4Icon != null || isEarthDefaultTap) && k4LongPressLabels == null) {
-        IconKeyButton(
+        // 图标形态：用可手势的图标键，避免「配了滑动但走 IconKeyButton 被丢弃」
+        SwipeableIconKeyButton(
             icon = k4Icon ?: rememberVectorPainter(Icons.Default.Language),
             onClick = k4OnClick,
             backgroundColor = env.keyBackgroundColor,
@@ -1357,6 +1510,10 @@ private fun EarthCell(env: QwertyRowEnv, modifier: Modifier) {
             modifier = modifier,
             a11yDescription = "中英切换",
             a11yState = if (env.isAsciiMode) "当前英文" else "当前中文",
+            onSwipe = k4Gestures.onUp,
+            onSwipeDown = k4Gestures.onDown,
+            onSwipeLeft = k4Gestures.onLeft,
+            onSwipeRight = k4Gestures.onRight,
             onPress = { env.onKeyPressDown?.invoke(k4TapValue) },
             onRelease = { env.onKeyRelease?.invoke(k4TapValue) },
             shadowEnabled = env.shadowEnabled,
@@ -1380,6 +1537,8 @@ private fun EarthCell(env: QwertyRowEnv, modifier: Modifier) {
             swipeDownKeyLabel = k4SwipeDownKeyLabel,
             onSwipe = k4OnSwipe,
             onSwipeDown = k4OnSwipeDown,
+            onSwipeLeft = k4Gestures.onLeft,
+            onSwipeRight = k4Gestures.onRight,
             onSwipeStateChange = { state, bounds -> env.processSwipeState(state, bounds) },
             onPress = { env.onKeyPressDown?.invoke(k4TapValue) },
             onRelease = { env.onKeyRelease?.invoke(k4TapValue) },
@@ -1862,7 +2021,7 @@ private fun LandscapeKeyboardContent(
     val onKeyPressDown = callbacks.onKeyPressDown
     val onKeyRelease = callbacks.onKeyRelease
     val onCommitText = callbacks.onCommitText
-    val onGestureAction = buildUiGestureHandler(viewModel, callbacks, uiState, requestVoice = null)
+    val onGestureAction = buildUiGestureHandler(viewModel, callbacks, uiState, requestVoice = null, onKeyPress = onKeyPress)
     val env = QwertyRowEnv(
         isAsciiMode = isAsciiMode,
         isShifted = visualIsShifted,
@@ -1966,10 +2125,20 @@ private fun SpaceKey(
     onLongPress: (() -> Unit)? = null,
     /** 滑动手势：参数为方向 "up"/"down"/"left"/"right"；为 null 时不检测滑动。 */
     onSwipe: ((String) -> Unit)? = null,
+    /** 长按气泡项；非空时接管长按（气泡滑动选择），[onLongPress] 与 [onSwipe] 不再生效。 */
+    longPressItems: List<String>? = null,
+    longPressDrawableIds: List<Int> = emptyList(),
+    onLongPressSelect: ((String) -> Unit)? = null,
+    onSwipeStateChange: ((SwipeState, Rect) -> Unit)? = null,
 ) {
     val currentOnKeyPress by rememberUpdatedState(onKeyPress)
     val currentOnKeyPressDown by rememberUpdatedState(onKeyPressDown)
     val currentOnKeyRelease by rememberUpdatedState(onKeyRelease)
+    val currentOnLongPressSelect by rememberUpdatedState(onLongPressSelect)
+    val currentLongPressItems by rememberUpdatedState(longPressItems)
+    val currentLongPressDrawableIds by rememberUpdatedState(longPressDrawableIds)
+    val view = LocalView.current
+    var buttonBounds by remember { mutableStateOf(Rect(0f, 0f, 0f, 0f)) }
     val currentOnVoiceModeChange by rememberUpdatedState(onVoiceModeChange)
     val currentOnTap by rememberUpdatedState(onTap)
     val currentOnLongPress by rememberUpdatedState(onLongPress)
@@ -1998,7 +2167,7 @@ private fun SpaceKey(
     Box(
         modifier = modifier
             .fillMaxHeight()
-            .pointerInput(isSttEnabled, voiceSticky) {
+            .pointerInput(isSttEnabled, voiceSticky, currentLongPressItems == null) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
 
@@ -2010,6 +2179,86 @@ private fun SpaceKey(
                     }
 
                     currentOnKeyPressDown?.invoke("space")
+
+                    val items = currentLongPressItems
+                    if (items != null) {
+                        // 长按气泡滑动选择（配置了 long_press 多项时接管长按；该键不再检测滑动）
+                        var triggered = false
+                        var moved = false
+                        var selectedIdx = 0
+                        val downX = down.position.x
+                        val downY = down.position.y
+                        val longPressJob = scope.launch {
+                            delay(400)
+                            triggered = true
+                            view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                            onSwipeStateChange?.invoke(
+                                SwipeState(
+                                    isPressed = true,
+                                    isLongPress = true,
+                                    longPressItems = items,
+                                    selectedLongPressIndex = 0,
+                                    longPressDrawableIds = currentLongPressDrawableIds,
+                                ),
+                                buttonBounds,
+                            )
+                        }
+                        val cancelThresholdPx = with(density) { 5.dp.toPx() }
+                        try {
+                            var lastReportedIdx = -1
+                            var completed = false
+                            while (!completed) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
+                                val isRelease =
+                                    event.type == androidx.compose.ui.input.pointer.PointerEventType.Release
+                                if (!triggered) {
+                                    if (!moved && (kotlin.math.abs(change.position.x - downX) > cancelThresholdPx ||
+                                            kotlin.math.abs(change.position.y - downY) > cancelThresholdPx)
+                                    ) {
+                                        moved = true
+                                        longPressJob.cancel()
+                                    }
+                                    if (isRelease) {
+                                        completed = true
+                                        // 短按（未长按、未移动）照常上屏空格；移动过则按未绑定处理
+                                        if (!moved) {
+                                            if (currentOnTap != null) currentOnTap?.invoke()
+                                            else currentOnKeyPress("space")
+                                        }
+                                    }
+                                    continue
+                                }
+                                val itemWidth = buttonBounds.width / items.size
+                                selectedIdx = (((change.position.x - downX) / itemWidth) +
+                                    if (items.size > 1) 0.5f else 0f)
+                                    .toInt().coerceIn(0, items.size - 1)
+                                if (!isRelease && selectedIdx != lastReportedIdx) {
+                                    lastReportedIdx = selectedIdx
+                                    onSwipeStateChange?.invoke(
+                                        SwipeState(
+                                            isPressed = true,
+                                            isLongPress = true,
+                                            longPressItems = items,
+                                            selectedLongPressIndex = selectedIdx,
+                                            longPressDrawableIds = currentLongPressDrawableIds,
+                                        ),
+                                        buttonBounds,
+                                    )
+                                }
+                                change.consume()
+                                if (isRelease) {
+                                    completed = true
+                                    items.getOrNull(selectedIdx)?.let { currentOnLongPressSelect?.invoke(it) }
+                                }
+                            }
+                        } finally {
+                            longPressJob.cancel()
+                            onSwipeStateChange?.invoke(SwipeState(), buttonBounds)
+                        }
+                        currentOnKeyRelease?.invoke("space")
+                        return@awaitEachGesture
+                    }
 
                     var longPressTriggered = false
                     val longPressJob = scope.launch {
@@ -2061,7 +2310,8 @@ private fun SpaceKey(
                 null,
             ) {
                 if (currentOnTap != null) currentOnTap?.invoke() else currentOnKeyPress("space")
-            },
+            }
+            .onGloballyPositioned { buttonBounds = it.boundsInRoot() },
         contentAlignment = Alignment.Center
     ) {
         when {

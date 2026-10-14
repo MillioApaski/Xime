@@ -226,6 +226,10 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                     clearInputStateForKeys()
                     needsUIUpdate = true
                 }
+                // command: show_ime_picker 的值同样走按键路由；弹选择器要在主线程
+                "show_ime_picker" -> withContext(Dispatchers.Main) {
+                    service.executeCommand("show_ime_picker")
+                }
                 "clear_all" -> {
                     // 上滑清空 = 多次退格快捷方式（对标主流输入法）：输入态只清输入态，空闲态清空全部已上屏。
                     // 输入态判定见 hasInputState()——不能用 RIME getInput()，tryLocked 锁竞争时静默返回空。
