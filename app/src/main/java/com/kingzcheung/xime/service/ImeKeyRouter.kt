@@ -4,6 +4,9 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
 import com.kingzcheung.xime.association.AssociationManager
+import com.kingzcheung.xime.service.CandidateAction
+import com.kingzcheung.xime.correction.CorrectionPriors
+import com.kingzcheung.xime.correction.KeyTapLogger
 import com.kingzcheung.xime.keyboard.OverlayRoute
 import com.kingzcheung.xime.rime.RimeCandidate
 import com.kingzcheung.xime.rime.resolveRimeCandidateIndex
@@ -24,6 +27,11 @@ import kotlinx.coroutines.withContext
  * 所有共享状态通过 service 引用访问（同模块 internal 成员）。
  */
 internal class ImeKeyRouter(private val service: XimeInputMethodService) {
+    private companion object {
+        /** 纠错插件产出候选的标注（correction_translator 的 SimpleCandidate comment）。 */
+        const val CORRECTION_COMMENT = "纠错"
+    }
+
 
     /**
      * 候选词变换（hotPath 插件能力）+ 发送 UI 更新。
@@ -35,13 +43,50 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
         afterUpdate: (suspend () -> Unit)? = null,
     ) {
         val transformed = service.candidateTransform.transformFor(result)
+        // 会话日志：记录本键处理后的组合快照（输入串/候选/上屏增量），供离线重建纠错标签
+        KeyTapLogger.recordComposition(
+            result.inputText, result.preeditText, result.committedText, result.isAsciiMode,
+            result.candidates.map { it.text to it.comment }
+        )
+
+        // 邻键误触纠错：把按键几何先验与当前组合编码对齐后送入 librime 插件
+        // （候选生成/打分/出词/排序都在插件内完成，用同一份词典与用户词典）。
+        // 编码为空/不一致时清空先验，插件拿不到对齐先验会直接返回空 → 结构性不误纠。
+        CorrectionPriors.syncWithComposition(result.inputText)
+
+        // 纠错候选升位：引擎把纠错候选排在末尾（插件 quality=-1000），展示层把它提到
+        // 首选之后（二选起）。语义：首选必须留给正常候选（无法确认用户真的按错了），
+        // 但纠错埋到几十名开外就失去了意义。
+        val baseCandidates = transformed?.candidates ?: result.candidates.toList()
+        val baseActions = transformed?.actions ?: emptyList()
+        val promoted = promoteCorrectionCandidates(baseCandidates, baseActions)
+
         service.uiEventChannel.trySend {
             service.sessionController.updateUIWithResult(
-                transformed?.let { result.copy(candidates = it.candidates.toTypedArray()) } ?: result,
-                transformed?.actions ?: emptyList()
+                result.copy(candidates = (promoted?.first?.toList() ?: baseCandidates).toTypedArray()),
+                promoted?.second ?: baseActions
             )
             if (afterUpdate != null) afterUpdate()
         }
+    }
+
+    /**
+     * 把带「纠错」标注的候选整体插到首个正常候选之后；其余正常候选顺延。
+     * 动作列表逐位映射回引擎原始索引（actions 为空 = 引擎语义即位置索引）。
+     * 仅当正常候选与纠错候选同时存在时才重排；空码救回（只有纠错候选）保持原样。
+     */
+    private fun promoteCorrectionCandidates(
+        candidates: List<RimeCandidate>,
+        actions: List<CandidateAction>,
+    ): Pair<Array<RimeCandidate>, List<CandidateAction>>? {
+        val correctionIdx = candidates.indices.filter { candidates[it].comment == CORRECTION_COMMENT }
+        if (correctionIdx.isEmpty()) return null
+        val normalIdx = candidates.indices.filter { candidates[it].comment != CORRECTION_COMMENT }
+        if (normalIdx.isEmpty()) return null
+        val order = listOf(normalIdx.first()) + correctionIdx + normalIdx.drop(1)
+        val newCandidates = order.map { candidates[it] }.toTypedArray()
+        val newActions = order.map { if (actions.isEmpty()) CandidateAction.engine(it) else actions[it] }
+        return newCandidates to newActions
     }
 
     internal fun handleKeyPress(key: String, isShifted: Boolean) {
@@ -880,6 +925,8 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
             return
         }
         val candState = service.candidateState.value
+        // 会话日志：退格前输入串（用于识别"回删重打"纠错对）
+        KeyTapLogger.recordDelete(candState.inputText, candState.pendingEnglishText)
         // 退格改变输入上下文：使在途的联想预测结果失效，防止过期结果迟到回填
         // associationCandidates，导致长按退格删除时候选栏在"联想词↔空"之间闪动。
         service.predictionManager.invalidatePendingPredictions()
@@ -1388,11 +1435,25 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
      */
     internal fun deleteCandidate(displayIndex: Int) {
         postRimeJob {
-            val text = service.candidateState.value.candidates.getOrNull(displayIndex)
+            val state = service.candidateState.value
+            val text = state.candidates.getOrNull(displayIndex)
             if (text.isNullOrEmpty()) return@postRimeJob
-            val engineIndex = resolveRimeCandidateIndex(
-                displayIndex, text, service.rimeEngine.getCandidates().toList()
-            )
+            val action = state.candidateActions.getOrNull(displayIndex)
+            // 外部候选（插件变换 / 智能纠错）：不属于实时会话候选页，按显示索引删除会因
+            // resolveRimeCandidateIndex 的"找不到即回退 uiIndex"删到同序号的真实候选，
+            // 故直接跳过（只读建议不可删）。
+            if (action != null && action.isPluginCandidate) {
+                FileLogger.i(
+                    XimeInputMethodService.TAG,
+                    "DeleteCandidate: skip external candidate '$text' display=$displayIndex"
+                )
+                return@postRimeJob
+            }
+            val engineIndex = if (action != null && action.engineIndex >= 0) {
+                action.engineIndex
+            } else {
+                resolveRimeCandidateIndex(displayIndex, text, service.rimeEngine.getCandidates().toList())
+            }
             val ok = service.rimeEngine.deleteCandidateOnCurrentPage(engineIndex)
             FileLogger.i(
                 XimeInputMethodService.TAG,
@@ -1437,7 +1498,15 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
         service.composeViewRef?.let { service.feedbackManager.performKeyPressEffect(view = it) }
         // 入队前先按全局索引取全量候选：调用线程读到的 expandedCandidates 正是
         // UI 渲染的同一份列表；入队后再取可能被编码刷新清空/重建而扑空
-        val expandedCandidate = service.candidateState.value.expandedCandidates.getOrNull(globalIndex)
+        val state = service.candidateState.value
+        val expandedCandidate = state.expandedCandidates.getOrNull(globalIndex)
+        // 外部候选（智能纠错）：不属于实时会话候选页，直接上屏其文本并清空组合，
+        // 不能走 select_candidate(globalIndex)（会选到引擎侧同序号候选）。
+        val action = state.expandedActions.getOrNull(globalIndex)
+        if (action != null && action.isPluginCandidate) {
+            postRimeJob { commitPluginCandidate(action.commitText) }
+            return
+        }
         postRimeJob {
             // T9 方案的选词消费由 t9_processor 独立完成，直接调引擎 select 会
             // 遗留 [confirmed, phony] 残留组合态（见 selectCandidateAsync 注释），
@@ -1474,7 +1543,8 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                         hasNextPage = false,
                         hasPrevPage = false,
                         isShowingRecentClipboard = false,
-                        expandedCandidates = emptyList()
+                        expandedCandidates = emptyList(),
+                        expandedActions = emptyList()
                     )
                 }
             } else {
@@ -1489,7 +1559,14 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
     /** 候选展开页长按删除自造词：按跨页全局索引删除，删除后重拉全量候选 */
     internal fun deleteCandidateGlobal(globalIndex: Int) {
         postRimeJob {
-            val text = service.candidateState.value.expandedCandidates.getOrNull(globalIndex)?.text
+            val state = service.candidateState.value
+            // 外部候选（智能纠错）：非实时会话词条，禁止按全局索引删除
+            val action = state.expandedActions.getOrNull(globalIndex)
+            if (action != null && action.isPluginCandidate) {
+                FileLogger.i("ImeKeyRouter", "deleteCandidateGlobal: skip external index=$globalIndex")
+                return@postRimeJob
+            }
+            val text = state.expandedCandidates.getOrNull(globalIndex)?.text
             if (text.isNullOrEmpty()) return@postRimeJob
             val ok = service.rimeEngine.deleteCandidateByGlobalIndex(globalIndex)
             FileLogger.i(
