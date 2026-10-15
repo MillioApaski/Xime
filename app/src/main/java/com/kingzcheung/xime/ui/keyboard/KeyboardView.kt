@@ -1316,7 +1316,7 @@ fun KeyboardView(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = state.deploymentMessage.ifEmpty { "正在初始�?.." },
+                        text = state.deploymentMessage.ifEmpty { "正在初始化..." },
                         color = keyTextColor,
                         style = androidx.compose.material3.MaterialTheme.typography.bodyLarge
                     )
@@ -1330,7 +1330,7 @@ fun KeyboardView(
                         )
                     } else {
                         Text(
-                            text = "???",
+                            text = "请稍候",
                             color = keyTextColor.copy(alpha = 0.7f),
                             style = androidx.compose.material3.MaterialTheme.typography.bodyMedium
                         )
