@@ -61,6 +61,16 @@ endif()
 file(CREATE_LINK "../../librime-t9"
      "${T9_PLUGIN_LINK}" SYMBOLIC)
 
+# librime-correction 同样用符号链接接入（原理同上）
+set(CORRECTION_PLUGIN_LINK "${CMAKE_SOURCE_DIR}/librime/plugins/librime-correction")
+if(IS_SYMLINK "${CORRECTION_PLUGIN_LINK}")
+  file(REMOVE "${CORRECTION_PLUGIN_LINK}")
+elseif(EXISTS "${CORRECTION_PLUGIN_LINK}")
+  file(REMOVE_RECURSE "${CORRECTION_PLUGIN_LINK}")
+endif()
+file(CREATE_LINK "../../librime-correction"
+     "${CORRECTION_PLUGIN_LINK}" SYMBOLIC)
+
 # librime-lua 需要特殊命名 lua
 file(COPY "${CMAKE_SOURCE_DIR}/librime-lua/"
      DESTINATION "${CMAKE_SOURCE_DIR}/librime/plugins/lua")
