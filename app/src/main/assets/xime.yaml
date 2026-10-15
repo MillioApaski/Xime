@@ -531,8 +531,7 @@ keyboard:
       # 回车键
       enter: { width: 1.2, tap: { action: enter, bubble: false } }
       #  逗号键，label 为中文显示，value 为英文显示+提交值
-      # comma: { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
-      comma: { width: 0.8, tap: { label: "，", value: "," }, swipe_up: { label: "符号", action: command, value: symbol } }
+      comma: { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
 
 
       # 中/英切换键，label 为按键显示文字
