@@ -3,6 +3,7 @@ package com.kingzcheung.xime.settings
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.util.Log
 import com.kingzcheung.xime.plugin.core.api.BackupPlugin
 import com.kingzcheung.xime.plugin.core.api.RemoteBackupEntry
 import com.kingzcheung.xime.rime.RimeEngine
@@ -32,6 +33,8 @@ import java.util.zip.ZipOutputStream
  * 词库同步=增量合并（仅用户词典）。
  */
 object SyncManager {
+
+    private const val TAG = "SyncManager"
 
     /** 远端快照包文件名前缀：与配置备份条目在远端列表中区分 */
     const val REMOTE_SYNC_PREFIX = "rime-sync-"
@@ -65,7 +68,13 @@ object SyncManager {
 
     // ---------- 同步 ----------
 
-    /** 立即同步：合并 sync 目录下已有快照 + 导出本机快照。须在引擎所在进程调用。 */
+    /**
+     * 立即同步：合并 sync 目录下已有快照 + 导出本机快照。须在引擎所在进程调用。
+     *
+     * 注意：librime 的 `Synchronize` 只处理 `GetUserDictList`（本机已有 `<词典名>.userdb`
+     * 目录）列出的词典——换机/清数据后本机一个用户词库都没有，快照会被**静默跳过**
+     * 且 `sync_user_data()` 仍返回成功。这类场景必须用 [mergeSnapshots] 逐个直接合并。
+     */
     fun syncNow(context: Context): Result<Unit> {
         ensureInstallationYaml(context)
         if (!RimeEngine.isInitialized()) {
@@ -78,6 +87,59 @@ object SyncManager {
             Result.failure(IllegalStateException("同步未完成，详见应用日志"))
         }
     }
+
+    /** 递归收集 [dir] 下的词库快照文件（`*.userdb.txt`），按路径排序。纯函数。 */
+    internal fun snapshotFilesUnder(dir: File): List<File> {
+        if (!dir.isDirectory) return emptyList()
+        return dir.walkTopDown()
+            .filter { it.isFile && it.name.endsWith(SNAPSHOT_EXTENSION) }
+            .sortedBy { it.absolutePath }
+            .toList()
+    }
+
+    /** rime 目录下 sync 目录里的全部快照文件（恢复/补偿合并的输入）。 */
+    fun snapshotFiles(context: Context): List<File> =
+        snapshotFilesUnder(File(File(context.filesDir, "rime"), "sync"))
+
+    /**
+     * 逐个合并快照文件（不依赖 sync 目录扫描，纯引擎操作，便于单测）。
+     *
+     * librime 的 `Synchronize` 只合并本机已有 `<词典名>.userdb` 的词典，
+     * 换机/清数据恢复时快照会被静默跳过；这里按文件调 [RimeEngine.restoreUserDictSnapshot]
+     * （目标库名取自快照 `#@/db_name` 元数据，不存在则创建）。
+     *
+     * @return 成功合并的文件数；引擎未就绪返回 failure
+     */
+    internal fun mergeSnapshotFiles(files: List<File>): Result<Int> {
+        if (!RimeEngine.isInitialized()) {
+            return Result.failure(IllegalStateException("输入法引擎尚未初始化，请先在任意输入框唤起键盘一次"))
+        }
+        var merged = 0
+        for (file in files) {
+            if (RimeEngine.getInstance().restoreUserDictSnapshot(file.absolutePath)) {
+                merged++
+            } else {
+                // 合并失败的真机常见原因：目标词库被同进程的其他持有者占用
+                // （如 t9_digit.userdb 被 T9 数字词库模块长期 Open），leveldb 拿不到锁
+                Log.w(TAG, "mergeSnapshots: 快照合并失败：${file.absolutePath}")
+            }
+        }
+        return Result.success(merged)
+    }
+
+    /**
+     * 把快照文件合并进用户词库，随后 [syncNow] 把本机快照重新导出（含刚并入的词条）。
+     * @return 成功合并的文件数；引擎未就绪返回 failure
+     */
+    fun mergeSnapshots(context: Context, files: List<File>): Result<Int> {
+        val merged = mergeSnapshotFiles(files)
+        if (merged.isSuccess) syncNow(context)
+        return merged
+    }
+
+    /** 合并 sync 目录下的全部快照（恢复备份时的 pending 补偿入口）。 */
+    fun mergePendingSnapshots(context: Context): Result<Int> =
+        mergeSnapshots(context, snapshotFiles(context))
 
     // ---------- 打包 / 解包（纯 JVM，单测锚定） ----------
 
@@ -253,7 +315,8 @@ object SyncManager {
 
     /**
      * 导入快照/码表（文件选择器）：
-     * - **快照包 zip**（`sync/<id>/...` 或 `<id>/...`）→ 解到 `sync/imported/<uuid>/` 后随 sync 合并
+     * - **快照包 zip**（`sync/<id>/...` 或 `<id>/...`）→ 解到 `sync/imported/<uuid>/` 后
+     *   由 [mergeSnapshots] 逐个直接合并
      * - **快照文本** `<词典名>.userdb.txt`（用户词典备份、其他设备 sync 产物）→ 同上，
      *   文件名按 `#@/db_name` 元数据归位
      * - **词条码表** `<词典名>.txt`（用户词典导出、本机用户词典页导出）→ 按词库名直接
@@ -319,9 +382,10 @@ object SyncManager {
             if (snapshotFiles == 0 && importedEntries == 0) {
                 return Result.failure(IllegalArgumentException("所选文件中没有可导入的内容"))
             }
-            // 快照要触发引擎合并；码表已在 Import 里直接入库
+            // 快照逐个直接合并（本机还没有该用户词库时也能建库并合并，见 mergeSnapshots）；
+            // 码表已在 Import 里直接入库
             val merged = if (snapshotFiles > 0) {
-                syncNow(context).getOrElse { return Result.failure(it) }
+                mergeSnapshots(context, snapshotFilesUnder(targetDir)).getOrElse { return Result.failure(it) }
                 true
             } else false
             Result.success(SnapshotImportResult(snapshotFiles, importedEntries, merged))
@@ -385,7 +449,9 @@ object SyncManager {
             }
         }
         if (pulled > 0) {
-            syncNow(context).getOrElse { return Result.failure(it) }
+            // 逐个直接合并（不要求本机已有对应 .userdb：换机后本机一个用户词库都没有时，
+            // librime 的 Synchronize 会把新设备的快照整个跳过），随后重导本机快照
+            mergePendingSnapshots(context).getOrElse { return Result.failure(it) }
         }
 
         // 推送本机包：流式打包到 cacheDir（包体不进内存），推完即删

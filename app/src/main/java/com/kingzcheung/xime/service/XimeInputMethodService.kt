@@ -745,12 +745,15 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 }
                 notifyDeploymentStatus(false, "")
 
-                // 恢复备份时若引擎未就绪，自造词快照只落了盘没合并：此处补做一次 sync
+                // 恢复备份时若引擎未就绪，自造词快照只落了盘没合并：此处补做一次
                 // （librime 按时间戳合并，不会吃掉本机新词）。失败保留标记，下次引擎就绪再试。
                 if (SettingsPreferences.isPendingDictMerge(this@XimeInputMethodService)) {
-                    val merged = SyncManager.syncNow(this@XimeInputMethodService).isSuccess
-                    FileLogger.i(TAG, "initRimeEngine: pending 自造词快照合并=$merged")
-                    if (merged) SettingsPreferences.setPendingDictMerge(this@XimeInputMethodService, false)
+                    val merged = SyncManager.mergePendingSnapshots(this@XimeInputMethodService)
+                    FileLogger.i(
+                        TAG,
+                        "initRimeEngine: pending 自造词快照合并=${merged.getOrNull() ?: "失败"}"
+                    )
+                    if (merged.isSuccess) SettingsPreferences.setPendingDictMerge(this@XimeInputMethodService, false)
                 }
 
                 withContext(Dispatchers.Main) {

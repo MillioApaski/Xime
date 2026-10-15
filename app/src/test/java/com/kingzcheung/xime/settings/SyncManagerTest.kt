@@ -254,6 +254,42 @@ class SyncManagerTest {
         assertNull("只有镜像时没有可同步的词库数据", SyncManager.packSyncDir(rimeDir))
     }
 
+    /**
+     * 回归：导入快照落在 `sync/imported/<uuid>/`（比 librime 扫的一级子目录更深），
+     * 备份恢复落在 `sync/<id>/`。合并入口必须**递归**收集，否则换机恢复/导入快照
+     * 会"提示成功但词库是空的"。
+     */
+    @Test
+    fun `snapshot files are collected recursively and skip config mirrors`() {
+        val rimeDir = tempDir.newFolder("rime-snapshot-scan")
+        val ownSync = File(rimeDir, "sync/id-A").apply { mkdirs() }
+        File(ownSync, "pinyin_simp.userdb.txt").writeText(snapshotContent)
+        File(ownSync, "pinyin_simp.dict.yaml").writeText("name: pinyin_simp\n")
+        val imported = File(rimeDir, "sync/imported/2f0e1c9a").apply { mkdirs() }
+        File(imported, "wubi86.userdb.txt").writeText(snapshotContent)
+        File(imported, "notes.txt").writeText("hello")
+
+        assertEquals(
+            listOf("pinyin_simp.userdb.txt", "wubi86.userdb.txt"),
+            SyncManager.snapshotFilesUnder(File(rimeDir, "sync")).map { it.name }
+        )
+        assertTrue("sync 目录不存在时为空", SyncManager.snapshotFilesUnder(File(rimeDir, "nope")).isEmpty())
+    }
+
+    /** 引擎未就绪时合并必须快速失败（置 pending），不得假装成功。 */
+    @Test
+    fun `merge snapshot files does not report success without engine`() {
+        val file = File(tempDir.newFolder("snap-only"), "pinyin_simp.userdb.txt")
+            .apply { writeText(snapshotContent) }
+
+        val reportedSuccess = try {
+            SyncManager.mergeSnapshotFiles(listOf(file)).isSuccess
+        } catch (_: LinkageError) {
+            false // JVM 无 native 库（UnsatisfiedLinkError/类初始化失败）：等同"引擎未就绪"
+        }
+        assertFalse("引擎不可用时不得报告合并成功", reportedSuccess)
+    }
+
     // ---- 解包安全 ----
     @Test
     fun `unpack rejects path traversal entries`() {

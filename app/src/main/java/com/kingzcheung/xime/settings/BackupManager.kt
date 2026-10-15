@@ -93,7 +93,7 @@ object BackupManager {
     /**
      * 从远端恢复：宿主流式下载到缓存文件 → 按条目前缀路由落盘 → 释放句柄。
      *
-     * 落盘后还有两步收尾（[afterRestore]）：包内含自造词快照时触发引擎 sync 合并
+     * 落盘后还有两步收尾（[afterRestore]）：包内含自造词快照时逐个直接合并进用户词库
      * （引擎未就绪则记 pending，等引擎起来再合并）；并把 default.custom.yaml 里的
      * 启用方案列表重新镜像进 default.yaml。
      *
@@ -166,19 +166,31 @@ object BackupManager {
     /**
      * 恢复后收尾：自造词快照合并 + 启用方案列表镜像。
      *
-     * 词库不直接覆盖 leveldb，而是把 `sync/<installation_id>/` 下的 `*.userdb.txt` 交给 librime
-     * 按时间戳合并（与词库同步同语义）：备份后本机新打的词不会被旧备份吃掉。
+     * 词库不直接覆盖 leveldb，而是把落盘的 `*.userdb.txt` 快照交给 librime
+     * `UserDictManager::Restore` 按时间戳合并（与词库同步同语义）：备份后本机新打的词
+     * 不会被旧备份吃掉；目标库名取自快照元数据，本机还没有该词库时会创建
+     * （换机/清数据场景，见 [SyncManager.mergeSnapshots]）。
      * 引擎未就绪（冷启动直接进设置页）时记 pending 标记，由 IME 服务引擎就绪后补做。
      */
     private suspend fun afterRestore(context: Context, outcome: RestoreOutcome) {
         if (outcome.dictSnapshotCount > 0) {
-            if (SyncManager.syncNow(context).isSuccess) {
-                Log.i(TAG, "Restore: 自造词快照已合并（${outcome.dictSnapshotCount} 个文件）")
-                SettingsPreferences.setPendingDictMerge(context, false)
-            } else {
-                Log.w(TAG, "Restore: 引擎未就绪，自造词快照待合并（pending）")
-                SettingsPreferences.setPendingDictMerge(context, true)
-            }
+            // 词库不直接覆盖 leveldb：快照交给 librime `UserDictManager::Restore` 按时间戳合并
+            // （与词库同步同语义）：备份后本机新打的词不会被旧备份吃掉。
+            //
+            // 这里**不能**只调 syncNow()：librime 的 `Synchronize` 只处理本机已有
+            // `<词典名>.userdb` 的词典，换机/清数据时本机一个用户词库都没有，快照会被静默
+            // 跳过（且 sync 仍返回成功）——曾是"显示恢复成功但词库是空的"的根因。
+            val snapshots = SyncManager.snapshotFiles(context)
+            SyncManager.mergeSnapshots(context, snapshots)
+                .onSuccess { mergedCount ->
+                    Log.i(TAG, "Restore: 自造词快照已合并（$mergedCount/${snapshots.size} 个文件）")
+                    // 一个都没并进去（包内快照损坏等）时留 pending，交给引擎就绪后重试
+                    SettingsPreferences.setPendingDictMerge(context, mergedCount == 0)
+                }
+                .onFailure { e ->
+                    Log.w(TAG, "Restore: 引擎未就绪，自造词快照待合并（pending）", e)
+                    SettingsPreferences.setPendingDictMerge(context, true)
+                }
         }
         // default.custom.yaml 已随包恢复（启用方案列表）：重新镜像进 default.yaml。
         // default.yaml 本身不进包（派生基座），避免恢复时把旧版本基座一起盖回来。
