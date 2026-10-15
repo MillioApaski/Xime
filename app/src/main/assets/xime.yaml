@@ -404,6 +404,8 @@ color_schemes:
 #   long_press: { display: "bubble", values: [ { label: "大写", action: "commit", value: "A" }, { label: "Ä", action: "commit", value: "ä" } ] }
 #   # 也支持字符串简写：
 #   long_press: { display: "bubble", values: ["q", "Q"] }
+#   # 单个动作可直写（不写 values，等价于只含这一项的列表）；bubble: false 时不弹气泡、长按直接执行：
+#   long_press: { label: "语音", action: "voice", bubble: false }
 keyboard:
   # ── 键盘颜色配置（可选，不设置则使用内置默认值）──
   # 背景色已由 color_schemes.*.keyboard_background 接管
@@ -525,7 +527,7 @@ keyboard:
       mode_change: { width: 1.2, tap: { action: command, value: mode_change, bubble: false }, long_press: { display: bubble, values: [ { label: number, action: command, value: mode_change_number }, { label: common_symbol, action: command, value: mode_change_common_symbol } ] } }
       # 空格键：单击上屏空格；长按进入语音输入（含麦克风权限校验）
       # 长按若想改为「重复空格」：long_press: { values: [ { action: repeat_space, value: 5 } ] }
-      space: { width: 3, tap: { action: space }, long_press: { values: [ { label: "语音", action: voice } ] } }
+      space: { width: 3, tap: { action: space }, long_press: { label: "语音", action: voice, bubble: false } }
       # 回车键
       enter: { width: 1.2, tap: { action: enter, bubble: false } }
       #  逗号键，label 为中文显示，value 为英文显示+提交值
@@ -589,7 +591,7 @@ keyboard:
       mode_change: { width: 1.2, tap: { action: command, value: mode_change , bubble: false}, long_press: { display: bubble, values: [ { label: number, action: command, value: mode_change_number }, { label: common_symbol, action: command, value: mode_change_common_symbol } ] } }
       # 空格键：单击上屏空格；长按进入语音输入（含麦克风权限校验）
       # 长按若想改为「重复空格」：long_press: { values: [ { action: repeat_space, value: 5 } ] }
-      space: { width: 3, tap: { action: space }, long_press: { values: [ { label: "语音", action: voice } ] } }
+      space: { width: 3, tap: { action: space }, long_press: { label: "语音", action: voice, bubble: false } }
       # 回车键
       enter: { width: 1.2, tap: { action: enter } }
       #  逗号键，label 为中文显示，value 为英文显示+提交值
@@ -659,7 +661,7 @@ keyboard:
       # 两端 ?123：单击切面板，长按弹出「数字 / 常用符号」
       mode_change: { width: 1.2, tap: {  action: command, value: mode_change, bubble: false }, long_press: { display: bubble, values: [ { label: number, action: command, value: mode_change_number }, { label: common_symbol, action: command, value: mode_change_common_symbol } ] } }
       # 空格键：单击上屏空格；长按进入语音输入（含麦克风权限校验）
-      space: { width: 5.5, tap: {  action: space, bubble: false }, long_press: { values: [ { label: "语音", action: voice } ] } }
+      space: { width: 5.5, tap: {  action: space, bubble: false }, long_press: { label: "语音", action: voice, bubble: false } }
       # 左右光标键：组合态移动编码编辑光标、空闲态移动编辑器光标
       cursor_left: { tap: {  action: cursor_left, bubble: false } }
       cursor_right: { tap: {  action: cursor_right, bubble: false } }
@@ -710,7 +712,7 @@ keyboard:
       comma: { width: 1, tap: {  label: ",", value: ",", bubble: false } }
       period: { width: 1, tap: {  label: ".", value: ".", bubble: false } }
       mode_change: { width: 1.2, tap: {  action: command, value: mode_change, bubble: false }, long_press: { display: bubble, values: [ { label: number, action: command, value: mode_change_number }, { label: common_symbol, action: command, value: mode_change_common_symbol } ] } }
-      space: { width: 5.5, tap: {  action: space, bubble: false }, long_press: { values: [ { label: "语音", action: voice } ] } }
+      space: { width: 5.5, tap: {  action: space, bubble: false }, long_press: { label: "语音", action: voice, bubble: false } }
       cursor_left: { tap: {  action: cursor_left, bubble: false } }
       cursor_right: { tap: {  action: cursor_right, bubble: false } }
       tab: { width: 1.2, tap: {  action: tab, bubble: false } }
