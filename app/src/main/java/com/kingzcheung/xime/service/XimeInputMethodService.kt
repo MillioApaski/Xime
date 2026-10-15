@@ -2316,6 +2316,9 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         }
     }
 
+    /** onUpdateSelection 重入闸门（见 SelectionUpdateGate）。 */
+    private val selectionUpdateGate = SelectionUpdateGate()
+
     override fun onUpdateSelection(
         oldSelStart: Int,
         oldSelEnd: Int,
@@ -2325,18 +2328,24 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         candidatesEnd: Int,
     ) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
-        if (!shouldBreakCompositionOnSelectionChange(
-                oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd
+        // 自身写入 InputConnection 会同步触发本回调，处理中直接忽略，避免递归
+        if (!selectionUpdateGate.tryEnter()) return
+        try {
+            if (!shouldBreakCompositionOnSelectionChange(
+                    oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd
+                )
+            ) {
+                return
+            }
+            if (!hasPendingComposition()) return
+            FileLogger.i(
+                TAG,
+                "onUpdateSelection: 丢弃待上屏组合态 ($oldSelStart,$oldSelEnd)->($newSelStart,$newSelEnd)"
             )
-        ) {
-            return
+            breakPendingCompositionForCaretMove(newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        } finally {
+            selectionUpdateGate.exit()
         }
-        if (!hasPendingComposition()) return
-        FileLogger.i(
-            TAG,
-            "onUpdateSelection: 丢弃待上屏组合态 ($oldSelStart,$oldSelEnd)->($newSelStart,$newSelEnd)"
-        )
-        breakPendingCompositionForCaretMove(newSelStart, newSelEnd, candidatesStart, candidatesEnd)
     }
 
     /** 是否存在未上屏的组合态（输入框 composing / t9 半提交 / 引擎输入）。 */

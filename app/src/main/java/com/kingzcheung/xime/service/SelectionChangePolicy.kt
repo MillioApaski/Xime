@@ -25,6 +25,28 @@ internal fun shouldBreakCompositionOnSelectionChange(
 }
 
 /**
+ * onUpdateSelection 的重入闸门。
+ *
+ * 宿主（如 Compose）会在输入法写完选区后同步回调 updateSelection，
+ * 若不在回调里拦住这次自触发，就会无限递归导致栈溢出。
+ */
+internal class SelectionUpdateGate {
+    private var handling = false
+
+    /** 进入处理区；已在处理中返回 false（自触发回调，调用方直接返回即可）。 */
+    fun tryEnter(): Boolean {
+        if (handling) return false
+        handling = true
+        return true
+    }
+
+    /** 退出处理区，需放在 try/finally 中。 */
+    fun exit() {
+        handling = false
+    }
+}
+
+/**
  * 丢弃输入框内的未上屏编码后应恢复的光标位置；null = 不删除编码文本。
  *
  * 编码在输入框里以 composing 区域存在（宿主不会在光标移出时定稿），

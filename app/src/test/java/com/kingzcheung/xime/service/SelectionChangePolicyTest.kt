@@ -104,3 +104,31 @@ class SelectionChangePolicyTest {
         assertNull(removalCaret(1, 1, 5, 5))
     }
 }
+
+/**
+ * 选区回调重入闸门：外层放行、处理中（自身写入触发的同步回调）拒绝、退出后恢复。
+ * 回归 StackOverflowError——onUpdateSelection 写 InputConnection 后宿主同步回调 updateSelection。
+ */
+class SelectionUpdateGateTest {
+
+    @Test
+    fun `首次进入放行`() {
+        assertTrue(SelectionUpdateGate().tryEnter())
+    }
+
+    @Test
+    fun `处理中再次进入被拒_屏蔽自触发回调`() {
+        val gate = SelectionUpdateGate()
+        assertTrue(gate.tryEnter())
+        assertFalse(gate.tryEnter())
+        assertFalse(gate.tryEnter())
+    }
+
+    @Test
+    fun `退出后可再次进入`() {
+        val gate = SelectionUpdateGate()
+        assertTrue(gate.tryEnter())
+        gate.exit()
+        assertTrue(gate.tryEnter())
+    }
+}
