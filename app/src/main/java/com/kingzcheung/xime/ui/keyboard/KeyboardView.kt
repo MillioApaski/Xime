@@ -63,6 +63,7 @@ import com.kingzcheung.xime.keyboard.PanelType
 import com.kingzcheung.xime.keyboard.ToolbarAction
 import com.kingzcheung.xime.keyboard.ToolbarButton
 import com.kingzcheung.xime.keyboard.ToolbarButtonItem
+import com.kingzcheung.xime.keyboard.isBuiltinToolbarButtonAvailable
 import com.kingzcheung.xime.keyboard.resolveToolbarButtonItem
 import com.kingzcheung.xime.rime.T9InputController
 import com.kingzcheung.xime.service.CandidateState
@@ -419,6 +420,7 @@ fun KeyboardView(
                 )
             }
 
+            val toolbarContext = LocalContext.current
             CandidateBar(
                 state = candidateBarState,
                 page = page,
@@ -433,14 +435,18 @@ fun KeyboardView(
                 voicePluginName = state.voicePluginName,
                 toolbarActions = state.toolbarButtons.mapNotNull { id ->
                     val item = resolveToolbarButtonItem(id, state.toolbarPluginButtons) ?: return@mapNotNull null
-                    if (item is ToolbarButtonItem.Builtin && item.button == ToolbarButton.HANDWRITING_LOOKUP) {
-                        if (!com.kingzcheung.xime.handwriting.HandwritingEngine.hasModel(LocalContext.current)) return@mapNotNull null
-                    }
-                    // 语音转文本开关关闭时隐藏工具栏语音按钮
-                    if (item is ToolbarButtonItem.Builtin && item.button == ToolbarButton.VOICE && !state.isSttEnabled) {
+                    // 与定制列表同一口径（关掉语音转文本 / 未装手写模型则不显示）
+                    if (item is ToolbarButtonItem.Builtin &&
+                        !isBuiltinToolbarButtonAvailable(
+                            item.button,
+                            isSttEnabled = state.isSttEnabled,
+                            hasHandwritingModel = {
+                                com.kingzcheung.xime.handwriting.HandwritingEngine.hasModel(toolbarContext)
+                            },
+                        )
+                    ) {
                         return@mapNotNull null
                     }
-                    val toolbarContext = LocalContext.current
                     val onClick: () -> Unit = when (item) {
                         is ToolbarButtonItem.Builtin -> when (item.button) {
                             ToolbarButton.EMOJI -> ({ viewModel.showOverlay(OverlayRoute.Emoji) })
@@ -1489,6 +1495,7 @@ fun KeyboardView(
                     is OverlayRoute.ToolbarCustomize -> ToolbarCustomizeView(
                         toolbarButtons = state.toolbarButtons,
                         pluginButtons = state.toolbarPluginButtons,
+                        isSttEnabled = state.isSttEnabled,
                         keyTextColor = keyTextColor,
                         backgroundColor = keyboardBgColor,
                         accentColor = accentColor,
