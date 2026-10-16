@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -344,14 +343,15 @@ fun KeyButton(
                 }
                 .pointerInput(currentOnLongClick != null) {
                     if (currentOnLongClick == null) {
-                        detectTapGestures(
+                        // 容差点击：不因指针漂出键格（isOutOfBounds）而取消，见 detectTolerantTapGestures
+                        detectTolerantTapGestures(
                             onPress = {
                                 isPressed = true
                                 onPress?.invoke()
-                                val released = tryAwaitRelease()
+                            },
+                            onPressEnd = { released ->
                                 // 位移/消费导致的取消：保留按压效果，由 onDragEnd/onDragCancel 统一清理，
                                 // 避免快速打字时按压反馈提前消失（无气泡感）。
-                                // outOfBounds 取消但拖动未激活时立即清理，防止状态泄漏。
                                 if (released || !dragActivated) {
                                     isPressed = false
                                     currentOnRelease?.invoke()
@@ -362,12 +362,13 @@ fun KeyButton(
                             }
                         )
                     } else {
-                        detectTapGestures(
+                        detectTolerantTapGestures(
                             onPress = {
                                 isPressed = true
                                 longPressActivated = false
                                 onPress?.invoke()
-                                val released = tryAwaitRelease()
+                            },
+                            onPressEnd = { released ->
                                 if (released || !dragActivated) {
                                     isPressed = false
                                     currentOnRelease?.invoke()
@@ -673,13 +674,15 @@ fun SwipeableKeyButton(
             }
             .pointerInput(text, currentLongPressItems.isNullOrEmpty()) {
                 if (currentLongPressItems.isNullOrEmpty()) {
-                    detectTapGestures(
+                    // 容差点击：不因指针漂出键格（isOutOfBounds）而取消，见 detectTolerantTapGestures
+                    detectTolerantTapGestures(
                         onPress = { offset ->
                             lastPressOffset = offset
                             isPressed = true
                             currentOnSwipeStateChange?.invoke(SwipeState(isPressed = true, pressedText = currentPressText), buttonBounds)
                             currentOnPress?.invoke()
-                            val released = tryAwaitRelease()
+                        },
+                        onPressEnd = { released ->
                             if (released || !dragActivated) {
                                 isPressed = false
                                 currentOnRelease?.invoke()
@@ -1150,11 +1153,12 @@ fun IconKeyButton(
             .fillMaxHeight()
             .fillMaxWidth()
             .pointerInput(Unit) {
-                detectTapGestures(
+                detectTolerantTapGestures(
                     onPress = {
                         isPressed = true
                         onPress?.invoke()
-                        tryAwaitRelease()
+                    },
+                    onPressEnd = {
                         isPressed = false
                         onRelease?.invoke()
                     },
@@ -1331,11 +1335,13 @@ fun SwipeableIconKeyButton(
             .fillMaxHeight()
             .fillMaxWidth()
             .pointerInput(Unit) {
-                detectTapGestures(
+                // 容差点击：不因指针漂出键格（isOutOfBounds）而取消，见 detectTolerantTapGestures
+                detectTolerantTapGestures(
                     onPress = {
                         isPressed = true
                         onPress?.invoke()
-                        val released = tryAwaitRelease()
+                    },
+                    onPressEnd = { released ->
                         if (released || !dragActivated) {
                             isPressed = false
                             currentOnRelease?.invoke()
@@ -1749,12 +1755,14 @@ fun SwipeableKeyButtonLandscape(
             .fillMaxWidth()
             .pointerInput(currentText, currentLongPressItems.isNullOrEmpty(), currentOnLongPressSelect != null) {
                 if (currentLongPressItems.isNullOrEmpty() || currentOnLongPressSelect == null) {
-                    detectTapGestures(
+                    // 容差点击：不因指针漂出键格（isOutOfBounds）而取消，见 detectTolerantTapGestures
+                    detectTolerantTapGestures(
                         onPress = {
                             isPressed = true
                             currentOnSwipeStateChange?.invoke(SwipeState(isPressed = true, pressedText = currentPressText), buttonBounds)
                             currentOnPress?.invoke()
-                            tryAwaitRelease()
+                        },
+                        onPressEnd = {
                             isPressed = false
                             currentOnRelease?.invoke()
                             currentOnSwipeStateChange?.invoke(SwipeState(), buttonBounds)
