@@ -179,6 +179,12 @@ object SyncManager {
         ZipOutputStream(out).use { zos ->
             syncDir.walkTopDown()
                 .filter { it.isFile && it.name.endsWith(SNAPSHOT_EXTENSION) }
+                // 旧版本把导入暂存放在 sync/imported/ 下：那是本机临时副本、不是设备快照，
+                // 继续打包只会让包越传越大、目录越套越深（历史遗留，新版暂存在 cacheDir）。
+                .filter {
+                    !it.relativeTo(syncDir).path.replace('\\', '/')
+                        .startsWith("$IMPORT_DIR_PREFIX/")
+                }
                 .forEach { f ->
                     zos.putNextEntry(ZipEntry(f.relativeTo(rimeDir).path.replace('\\', '/')))
                     f.inputStream().use { it.copyTo(zos) }
@@ -190,8 +196,9 @@ object SyncManager {
     }
 
     /**
-     * 解包快照 zip 到 [baseDir]：条目路径可为 "sync/<id>/..." 或 "<id>/..."
-     * （两种打包来源），统一剥掉 sync/ 前缀后落盘。
+     * 解包快照 zip 到 [baseDir]：条目路径可为 "sync/<id>/..."、"<id>/..."，也会遇到
+     * 历史包里的层层包装（"sync/sync/..."、"imported/<uuid>/..."）——统一规范化后落盘。
+     * 只收词库快照 `*.userdb.txt`，其余条目（配置镜像、包装目录）不落盘。
      * 含路径穿越/逃逸 baseDir 条目的包整体抛出 [SecurityException]。
      * @return 落盘文件数
      */
@@ -202,6 +209,26 @@ object SyncManager {
     internal fun unpackArchive(baseDir: File, archive: File): Int =
         unpackArchiveStream(baseDir, archive.inputStream())
 
+    /**
+     * 规范化包内条目路径：循环剥掉 `sync/` 前缀与 `imported/<uuid>/` 暂存包装，直到稳定。
+     *
+     * 只剥一层会让每次导入再多套一层（`imported/u2/imported/u1/...`），历史上正是这么套娃的。
+     * 纯函数，单测锚定。
+     */
+    internal fun normalizeEntryPath(name: String): String {
+        var rel = name.replace('\\', '/').trimStart('/')
+        while (true) {
+            rel = when {
+                rel.startsWith("sync/") -> rel.removePrefix("sync/")
+                // 暂存目录包装：imported/<uuid>/... → 两段一起丢
+                rel.startsWith("$IMPORT_DIR_PREFIX/") ->
+                    rel.removePrefix("$IMPORT_DIR_PREFIX/").substringAfter('/', "")
+                else -> break
+            }
+        }
+        return rel
+    }
+
     private fun unpackArchiveStream(baseDir: File, rawInput: java.io.InputStream): Int {
         val canonicalBase = baseDir.canonicalPath + File.separator
         var count = 0
@@ -209,13 +236,14 @@ object SyncManager {
             while (true) {
                 val entry = zis.nextEntry ?: break
                 if (entry.isDirectory) continue
-                var rel = entry.name.replace('\\', '/')
-                if (rel.startsWith("sync/")) rel = rel.removePrefix("sync/")
+                val rel = normalizeEntryPath(entry.name)
                 if (rel.isEmpty()) continue
                 val target = File(baseDir, rel)
                 if (!target.canonicalPath.startsWith(canonicalBase)) {
                     throw SecurityException("路径穿越: ${entry.name}")
                 }
+                // 只落盘词库快照：其它条目既不参与合并，也不该进 sync 目录被再次打包
+                if (!rel.endsWith(SNAPSHOT_EXTENSION)) continue
                 target.parentFile?.mkdirs()
                 target.outputStream().use { zis.copyTo(it) }
                 count++
@@ -315,8 +343,8 @@ object SyncManager {
 
     /**
      * 导入快照/码表（文件选择器）：
-     * - **快照包 zip**（`sync/<id>/...` 或 `<id>/...`）→ 解到 `sync/imported/<uuid>/` 后
-     *   由 [mergeSnapshots] 逐个直接合并
+     * - **快照包 zip**（`sync/<id>/...` 或 `<id>/...`，历史包可能层层包装）→ 规范化条目路径
+     *   解到 cacheDir 的暂存目录，由 [mergeSnapshots] 逐个直接合并（用完即删，不进 sync 树）
      * - **快照文本** `<词典名>.userdb.txt`（用户词典备份、其他设备 sync 产物）→ 同上，
      *   文件名按 `#@/db_name` 元数据归位
      * - **词条码表** `<词典名>.txt`（用户词典导出、本机用户词典页导出）→ 按词库名直接
@@ -326,8 +354,9 @@ object SyncManager {
      */
     fun importSnapshots(context: Context, uris: List<Uri>): Result<SnapshotImportResult> {
         if (uris.isEmpty()) return Result.failure(IllegalArgumentException("未选择文件"))
-        val rimeDir = File(context.filesDir, "rime")
-        val targetDir = File(File(rimeDir, "sync"), "$IMPORT_DIR_PREFIX/${UUID.randomUUID()}")
+        // 暂存目录放 cacheDir：绝不能落在 rime/sync 里，否则导入内容会被下次同步一起打包，
+        // 且每次导入都会在自己的上一层再套一层 imported/<uuid>/（目录无限套娃）。
+        val targetDir = File(File(context.cacheDir, "sync-import"), UUID.randomUUID().toString())
         return try {
             targetDir.mkdirs()
             var snapshotFiles = 0
@@ -393,6 +422,9 @@ object SyncManager {
             Result.failure(e)
         } catch (e: Exception) {
             Result.failure(e)
+        } finally {
+            // 快照已逐个合并进用户词库（mergeSnapshots 内是同步 JNI），暂存目录用完即删
+            targetDir.deleteRecursively()
         }
     }
 
