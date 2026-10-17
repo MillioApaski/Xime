@@ -136,7 +136,7 @@ class SchemaSettingsViewModel(application: Application) : AndroidViewModel(appli
                             result.conflicts.isNotEmpty() -> conflictMessage(result.conflicts)
                             !result.success -> "导入失败"
                             result.installedDirect -> "导入成功，已放入 rime 目录"
-                            else -> "导入成功，请到「本地方案」安装"
+                            else -> "导入成功，可在列表中安装"
                         }
                     )
                 }
