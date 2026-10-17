@@ -132,3 +132,135 @@ class SelectionUpdateGateTest {
         assertTrue(gate.tryEnter())
     }
 }
+
+/**
+ * 自身写入引起的光标位移识别。
+ *
+ * 回归 issue #1121 真机案例：五笔满码唯一上屏时，第 5 个键「上屏上一段首选 + 以该字母开新组合」，
+ * 上屏引起的 onUpdateSelection（光标 +1）被误当成用户移动光标，把刚建立的组合态丢弃
+ * —— 表现为第五码打不进候选框。
+ */
+class SelfWriteCaretGuardTest {
+
+    private val window = 800L
+
+    @Test
+    fun `上屏一个字符后的一次回调被识别为自身写入`() {
+        val guard = SelfWriteCaretGuard(window)
+        guard.noteWrite(1, 1_000)
+        assertTrue(guard.consumedBySelfWrite(3, 4, 1_020))
+    }
+
+    @Test
+    fun `命中后不会重复消费`() {
+        val guard = SelfWriteCaretGuard(window)
+        guard.noteWrite(1, 1_000)
+        assertTrue(guard.consumedBySelfWrite(3, 4, 1_020))
+        // 之后的光标移动（即使位移相同）都是真实移动
+        assertFalse(guard.consumedBySelfWrite(4, 5, 1_030))
+    }
+
+    @Test
+    fun `多次写入合并成一次回调`() {
+        val guard = SelfWriteCaretGuard(window)
+        guard.noteWrite(1, 1_000)
+        guard.noteWrite(1, 1_010)
+        assertTrue(guard.consumedBySelfWrite(3, 5, 1_020))
+    }
+
+    @Test
+    fun `多次写入分批回调逐个消费`() {
+        val guard = SelfWriteCaretGuard(window)
+        guard.noteWrite(2, 1_000)
+        assertTrue(guard.consumedBySelfWrite(3, 4, 1_010))
+        assertTrue(guard.consumedBySelfWrite(4, 5, 1_020))
+        assertFalse(guard.consumedBySelfWrite(5, 6, 1_030))
+    }
+
+    @Test
+    fun `删除的同向负位移被识别`() {
+        val guard = SelfWriteCaretGuard(window)
+        guard.noteWrite(-1, 1_000)
+        assertTrue(guard.consumedBySelfWrite(4, 3, 1_010))
+    }
+
+    @Test
+    fun `方向相反视为真实移动`() {
+        val guard = SelfWriteCaretGuard(window)
+        guard.noteWrite(1, 1_000)
+        // 超出「写入后极短窗口」（120ms）后，方向相反即认定用户移动光标
+        assertFalse(guard.consumedBySelfWrite(4, 3, 1_200))
+        // 假设被打破后清空预期，不再吞掉后续真实移动
+        assertFalse(guard.consumedBySelfWrite(3, 4, 1_020))
+    }
+
+    @Test
+    fun `位移超出预期视为真实移动`() {
+        val guard = SelfWriteCaretGuard(window)
+        guard.noteWrite(1, 1_000)
+        assertFalse(guard.consumedBySelfWrite(2, 5, 1_200))
+    }
+
+    @Test
+    fun `超出时间窗不再算自身写入`() {
+        val guard = SelfWriteCaretGuard(window)
+        guard.noteWrite(1, 1_000)
+        assertFalse(guard.consumedBySelfWrite(3, 4, 1_000 + window + 1))
+    }
+
+    @Test
+    fun `无写入记录时一律视为真实移动`() {
+        val guard = SelfWriteCaretGuard(window)
+        assertFalse(guard.consumedBySelfWrite(3, 4, 1_000))
+    }
+
+    @Test
+    fun `会话重置后清空预期`() {
+        val guard = SelfWriteCaretGuard(window)
+        guard.noteWrite(1, 1_000)
+        guard.reset()
+        assertFalse(guard.consumedBySelfWrite(3, 4, 1_010))
+    }
+}
+
+/** 宿主没给可用旧光标位置时：无法算位移，按自身写入处理，保留组合态。 */
+class SelfWriteCaretGuardUnknownOldSelectionTest {
+
+    @Test
+    fun `旧光标为负时按自身写入处理`() {
+        val guard = SelfWriteCaretGuard(350L)
+        guard.noteWrite(1, 1_000)
+        assertTrue(guard.consumedBySelfWrite(-1, 4, 1_010))
+    }
+
+    @Test
+    fun `旧光标为负但没有待处理写入时仍视为真实移动`() {
+        val guard = SelfWriteCaretGuard(350L)
+        assertFalse(guard.consumedBySelfWrite(-1, 4, 1_010))
+    }
+}
+
+/** 位移对不上预期时，写入后极短时间内的回调仍按自身写入处理（防宿主合并/规范化位移）。 */
+class SelfWriteCaretGuardRecentWriteTest {
+
+    @Test
+    fun `极短窗口内位移对不上也算自身写入`() {
+        val guard = SelfWriteCaretGuard(800L, 120L)
+        guard.noteWrite(1, 1_000)
+        assertTrue(guard.consumedBySelfWrite(3, 6, 1_030))
+    }
+
+    @Test
+    fun `超出极短窗口且位移对不上则视为真实移动`() {
+        val guard = SelfWriteCaretGuard(800L, 120L)
+        guard.noteWrite(1, 1_000)
+        assertFalse(guard.consumedBySelfWrite(3, 6, 1_200))
+    }
+
+    @Test
+    fun `迟到但仍对得上预期的回调也算自身写入`() {
+        val guard = SelfWriteCaretGuard(800L, 120L)
+        guard.noteWrite(2, 1_000)
+        assertTrue(guard.consumedBySelfWrite(3, 5, 1_700))
+    }
+}

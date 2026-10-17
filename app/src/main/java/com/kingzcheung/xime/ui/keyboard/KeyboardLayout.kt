@@ -75,6 +75,7 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import kotlin.math.abs
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -2207,15 +2208,16 @@ private fun SpaceKey(
                             )
                         }
                         val cancelThresholdPx = with(density) { 5.dp.toPx() }
+                        var completed = false
                         try {
                             var lastReportedIdx = -1
-                            var completed = false
                             while (!completed) {
                                 val event = awaitPointerEvent()
                                 val change = event.changes.firstOrNull() ?: break
-                                val isRelease =
-                                    event.type == androidx.compose.ui.input.pointer.PointerEventType.Release
+                                // 抬手只认本指针（别的手指抬起、ACTION_CANCEL 都按结束处理）
+                                val isRelease = change.changedToUpIgnoreConsumed()
                                 if (!triggered) {
+                                    // 5dp 只用于取消长按，不参与点击判定（该分支不检测滑动）
                                     if (!moved && (kotlin.math.abs(change.position.x - downX) > cancelThresholdPx ||
                                             kotlin.math.abs(change.position.y - downY) > cancelThresholdPx)
                                     ) {
@@ -2224,11 +2226,8 @@ private fun SpaceKey(
                                     }
                                     if (isRelease) {
                                         completed = true
-                                        // 短按（未长按、未移动）照常上屏空格；移动过则按未绑定处理
-                                        if (!moved) {
-                                            if (currentOnTap != null) currentOnTap?.invoke()
-                                            else currentOnKeyPress("space")
-                                        }
+                                        if (currentOnTap != null) currentOnTap?.invoke()
+                                        else currentOnKeyPress("space")
                                     }
                                     continue
                                 }
@@ -2258,6 +2257,11 @@ private fun SpaceKey(
                         } finally {
                             longPressJob.cancel()
                             onSwipeStateChange?.invoke(SwipeState(), buttonBounds)
+                            // 没等到抬手就结束（触摸流取消/协程被重挂）时兜底上屏空格
+                            if (!completed && !triggered) {
+                                if (currentOnTap != null) currentOnTap?.invoke()
+                                else currentOnKeyPress("space")
+                            }
                         }
                         currentOnKeyRelease?.invoke("space")
                         return@awaitEachGesture

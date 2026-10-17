@@ -837,39 +837,44 @@ fun KeyboardView(
                                     var lastSteps = 0
                                     var activationAnchorX = down.position.x
 
-                                    do {
-                                        val event = awaitPointerEvent()
-                                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                        val dx = change.position.x - down.position.x
-                                        val dy = change.position.y - down.position.y
+                                    // 手势结束即清标志，避免跨手势残留（26 键已改按本次手势峰值判定）
+                                    try {
+                                        do {
+                                            val event = awaitPointerEvent()
+                                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                            val dx = change.position.x - down.position.x
+                                            val dy = change.position.y - down.position.y
 
-                                        if (!change.pressed) {
-                                            if (isCursorGesture) {
-                                                event.changes.forEach { it.consume() }
+                                            if (!change.pressed) {
+                                                if (isCursorGesture) {
+                                                    event.changes.forEach { it.consume() }
+                                                }
+                                                break
                                             }
-                                            break
-                                        }
-                                        if (suppressCursorMove.value) break
-                                        if (abs(dx) > abs(dy) * 4f) {
+                                            if (suppressCursorMove.value) break
+                                            if (abs(dx) > abs(dy) * 4f) {
 
-                                            if (!isCursorGesture && abs(dx) > activationThresholdPx) {
-                                                isCursorGesture = true
-                                                activationAnchorX = change.position.x
-                                                cursorGestureActive.value = true
-                                            }
+                                                if (!isCursorGesture && abs(dx) > activationThresholdPx) {
+                                                    isCursorGesture = true
+                                                    activationAnchorX = change.position.x
+                                                    cursorGestureActive.value = true
+                                                }
 
-                                            if (isCursorGesture) {
-                                                event.changes.forEach { it.consume() }
-                                                val dxFromAnchor = change.position.x - activationAnchorX
-                                                val steps = (dxFromAnchor / stepThresholdPx).toInt()
-                                                if (steps != lastSteps) {
-                                                    val delta = steps - lastSteps
-                                                    currentOnCursorMove.value?.invoke(delta)
-                                                    lastSteps = steps
+                                                if (isCursorGesture) {
+                                                    event.changes.forEach { it.consume() }
+                                                    val dxFromAnchor = change.position.x - activationAnchorX
+                                                    val steps = (dxFromAnchor / stepThresholdPx).toInt()
+                                                    if (steps != lastSteps) {
+                                                        val delta = steps - lastSteps
+                                                        currentOnCursorMove.value?.invoke(delta)
+                                                        lastSteps = steps
+                                                    }
                                                 }
                                             }
-                                        }
-                                    } while (true)
+                                        } while (true)
+                                    } finally {
+                                        cursorGestureActive.value = false
+                                    }
                                 }
                             }
                         } else {

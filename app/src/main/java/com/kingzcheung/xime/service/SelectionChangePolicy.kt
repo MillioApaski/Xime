@@ -47,6 +47,68 @@ internal class SelectionUpdateGate {
 }
 
 /**
+ * 自身写入（上屏/删除）引起的光标位移识别。
+ *
+ * 上屏后宿主回传的 onUpdateSelection 与「用户移动光标」无法区分，会把同一次按键刚建立的
+ * 组合态丢弃（满码上屏后再按的字母被吞）。这里记录自身写入的预期位移，回调命中即认定
+ * 不是用户移动；超时、方向相反或位移超出预期时仍按真实移动处理。
+ */
+internal class SelfWriteCaretGuard(
+    /** 预期位移的保留时间：宿主回调可能迟一两帧。 */
+    private val windowMs: Long = 800L,
+    /** 写入后极短时间内的回调一律算自身写入（位移可能被宿主合并/规范化）。 */
+    private val recentWriteMs: Long = 120L,
+) {
+    private var expectedDelta = 0
+    private var lastWriteAt = 0L
+
+    /** 记录一次自身写入：[caretDelta] 为预期光标位移（上屏 +长度，删除 -长度）。 */
+    fun noteWrite(caretDelta: Int, now: Long) {
+        if (caretDelta == 0) return
+        expectedDelta += caretDelta
+        lastWriteAt = now
+    }
+
+    /** 该次选区变化是否由自身写入引起（命中后按观测值消费预期，支持分批/合并回调）。 */
+    fun consumedBySelfWrite(oldSelStart: Int, newSelStart: Int, now: Long): Boolean {
+        if (expectedDelta == 0) return false
+        if (now - lastWriteAt > windowMs) {
+            expectedDelta = 0
+            return false
+        }
+        // 旧光标不可用（部分输入框首帧为 -1）：算不出位移，按自身写入处理
+        if (oldSelStart < 0) {
+            expectedDelta = 0
+            lastWriteAt = 0L
+            return true
+        }
+        val observed = newSelStart - oldSelStart
+        if (observed == 0) return false
+        val elapsed = now - lastWriteAt
+        val sameDirection = (observed > 0) == (expectedDelta > 0)
+        if (!sameDirection || kotlin.math.abs(observed) > kotlin.math.abs(expectedDelta)) {
+            // 位移对不上预期：写入后极短时间内的回调仍算自身写入
+            if (elapsed <= recentWriteMs) {
+                expectedDelta = 0
+                lastWriteAt = 0L
+                return true
+            }
+            expectedDelta = 0
+            return false
+        }
+        expectedDelta -= observed
+        if (expectedDelta == 0) lastWriteAt = 0L
+        return true
+    }
+
+    /** 输入会话变化时清空。 */
+    fun reset() {
+        expectedDelta = 0
+        lastWriteAt = 0L
+    }
+}
+
+/**
  * 丢弃输入框内的未上屏编码后应恢复的光标位置；null = 不删除编码文本。
  *
  * 编码在输入框里以 composing 区域存在（宿主不会在光标移出时定稿），
