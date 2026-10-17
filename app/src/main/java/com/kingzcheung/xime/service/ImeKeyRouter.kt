@@ -363,6 +363,7 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                             if (anchorOk && ic != null) {
                                 // newCursorPosition=1：光标停在撤回内容末尾；
                                 // 传 text.length 会被 clamp 到整段文本末尾。
+                                service.noteSelfWriteCaretDelta(text.length)
                                 ic.commitText(text, 1)
                             }
                         }
@@ -1394,6 +1395,8 @@ internal class ImeKeyRouter(private val service: XimeInputMethodService) {
                     service.serviceScope.launch(Dispatchers.Main) {
                         val ic = service.currentInputConnection
                         if (ic != null) {
+                            // 删除表达式 + 提交结果：净光标位移 = 结果长度 - 表达式长度
+                            service.noteSelfWriteCaretDelta(textToCommit.length - expression.length)
                             // 删除输入框中已键入的表达式
                             ic.deleteSurroundingText(expression.length, 0)
                             // 提交选中的文本

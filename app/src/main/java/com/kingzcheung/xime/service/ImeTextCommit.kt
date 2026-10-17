@@ -171,6 +171,7 @@ internal class ImeTextCommit(private val service: XimeInputMethodService) {
     }
 
     internal fun deleteClipboardChars(count: Int) {
+        service.noteSelfWriteCaretDelta(-count)
         service.currentInputConnection?.deleteSurroundingText(count, 0)
     }
 

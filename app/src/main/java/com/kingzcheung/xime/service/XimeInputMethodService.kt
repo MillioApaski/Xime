@@ -2091,6 +2091,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         }
 
         predictionManager.clearCommittedText()
+        selfWriteCaret.reset()
         // 新输入会话清空 partial commit 累积：外部 UI（如设置页输入框"清除"按钮仅清 Compose
         // state）会触发 restartInput → 此处重建 T9，若残留累积会被 buildT9DisplayState 拼进
         // preedit 回灌输入框（2026-08-07 日志实证：清除后 testText 从 '' 回灌为 '几乎'）。
@@ -2322,6 +2323,9 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     /** onUpdateSelection 重入闸门（见 SelectionUpdateGate）。 */
     private val selectionUpdateGate = SelectionUpdateGate()
 
+    /** 自身写入引起的光标位移识别（见 [SelfWriteCaretGuard]）。 */
+    private val selfWriteCaret = SelfWriteCaretGuard()
+
     override fun onUpdateSelection(
         oldSelStart: Int,
         oldSelEnd: Int,
@@ -2334,6 +2338,13 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         // 自身写入 InputConnection 会同步触发本回调，处理中直接忽略，避免递归
         if (!selectionUpdateGate.tryEnter()) return
         try {
+            // 自身写入（上屏/删除）回传的光标变化：不是用户移动光标，不清组合态
+            if (selfWriteCaret.consumedBySelfWrite(
+                    oldSelStart, newSelStart, android.os.SystemClock.uptimeMillis()
+                )
+            ) {
+                return
+            }
             if (!shouldBreakCompositionOnSelectionChange(
                     oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd
                 )
@@ -2962,6 +2973,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             }
             return
         }
+        // 上屏会让光标前进 text.length，属自身写入
+        selfWriteCaret.noteWrite(text.length, android.os.SystemClock.uptimeMillis())
         currentInputConnection?.commitText(text, 1)
 
         // text_committed 事件：真实上屏才累计/投递（内部编辑器分支已在上方 return；
@@ -3071,6 +3084,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             }
             return
         }
+        // 删除会让光标后退 count，属自身写入
+        selfWriteCaret.noteWrite(-count, android.os.SystemClock.uptimeMillis())
         currentInputConnection?.deleteSurroundingText(count, 0)
     }
 
@@ -3102,6 +3117,10 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         }.getOrNull()
         if (before != expected) return false
         var replaced = false
+        // 批量替换的净光标位移 = 新长度 - 旧长度
+        selfWriteCaret.noteWrite(
+            replacement.length - expected.length, android.os.SystemClock.uptimeMillis()
+        )
         ic.beginBatchEdit()
         try {
             replaced = ic.deleteSurroundingText(expected.length, 0)
@@ -3110,6 +3129,19 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             ic.endBatchEdit()
         }
         return replaced
+    }
+
+    /** 登记一次自身写入后的预期光标位移（见 [SelfWriteCaretGuard]），供直写 InputConnection 的路径调用。 */
+    internal fun noteSelfWriteCaretDelta(delta: Int) {
+        selfWriteCaret.noteWrite(delta, android.os.SystemClock.uptimeMillis())
+    }
+
+    /** DEL 键回退一个字符，同属自身写入。 */
+    override fun sendDownUpKeyEvents(keyEventCode: Int) {
+        if (keyEventCode == KeyEvent.KEYCODE_DEL) {
+            selfWriteCaret.noteWrite(-1, android.os.SystemClock.uptimeMillis())
+        }
+        super.sendDownUpKeyEvents(keyEventCode)
     }
 
     
