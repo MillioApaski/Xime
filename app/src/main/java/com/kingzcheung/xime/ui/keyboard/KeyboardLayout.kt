@@ -58,7 +58,9 @@ import com.kingzcheung.xime.settings.ButtonLayout
 import com.kingzcheung.xime.settings.KeyAction
 import com.kingzcheung.xime.settings.KeyBinding
 import com.kingzcheung.xime.settings.KeyboardKeyConfig
+import com.kingzcheung.xime.settings.KeyboardRow
 import com.kingzcheung.xime.settings.KeysConfigHelper
+import com.kingzcheung.xime.settings.RowAlign
 import com.kingzcheung.xime.keyboard.GestureAction
 
 /** 半角 → 全角标点映射，中文模式下键帽显示用。提交仍走半角由 Rime 处理。 */
@@ -162,7 +164,8 @@ fun KeyboardLayout(
     val isSttEnabled = uiState.isSttEnabled
     val isVoiceMode = uiState.isVoiceMode
     val isVoiceSticky = uiState.voiceSticky
-    val keyRows = KeysConfigHelper.getKeyRows(isAsciiMode)
+    // 行布局：行声明（含行级 align/width）+ 参考列数 + 键盘级对齐策略
+    val rowsLayout = KeysConfigHelper.getRowsLayout(isAsciiMode)
     val onKeyPressDown = callbacks.onKeyPressDown
     val onKeyRelease = callbacks.onKeyRelease
     val onVoiceModeChange = callbacks.onVoiceModeChange
@@ -284,7 +287,7 @@ fun KeyboardLayout(
                 callbacks = callbacks,
                 uiState = uiState,
                 isAsciiMode = isAsciiMode,
-                keyRows = keyRows,
+                keyRows = rowsLayout.rows,
                 configVersion = cfgVer,
                 onSwipeStateChange = { state, bounds -> processSwipeState(state, bounds) },
             )
@@ -366,19 +369,20 @@ fun KeyboardLayout(
                             modifier = Modifier.weight(0.8f)
                         )
                     } else {
-                        val rows = remember(keyRows) { normalizeQwertyRows(keyRows) }
-                        rows.forEachIndexed { idx, ids ->
-                            // 9 键纯字母行（如 asdf 行）两端缩进，视觉居中。
-                            // 按首行键数取比例（9/10），任意行宽下第二行键宽都与首行一致——
-                            // 固定 16dp 在竖屏刚好、横屏宽行下不够，导致第二行键比首行宽
-                            val indent = if (ids.size == 9 && ids.none { it in KeysConfigHelper.FUNCTION_KEY_IDS }) {
-                                val firstRowSize = rows.firstOrNull()?.size ?: 10
+                        val rows = remember(rowsLayout.rows) { normalizeQwertyRows(rowsLayout.rows) }
+                        val columns = rowsLayout.columns ?: rows.firstOrNull()?.keys?.size ?: 10
+                        rows.forEach { row ->
+                            // 行宽由行声明或键盘级策略决定（[rowWidthFraction]）：显式 width 优先；
+                            // uniform 按列对齐（行宽 = 键数/列数，键宽与首行一致、行居中）；
+                            // stretch 或含功能键的行铺满均分。比例 < 1 时才需要居中缩进。
+                            val fraction = rowWidthFraction(row, columns, rowsLayout.rowAlign)
+                            val indent = if (fraction < 1f) {
                                 Modifier
-                                    .fillMaxWidth((9f / firstRowSize).coerceIn(0f, 1f))
+                                    .fillMaxWidth(fraction)
                                     .align(Alignment.CenterHorizontally)
                             } else Modifier
                             QwertyRow(
-                                ids = ids,
+                                ids = row.keys,
                                 env = env,
                                 modifier = Modifier.weight(1f).then(indent),
                             )
@@ -740,22 +744,22 @@ internal fun buildUiGestureHandler(
 }
 
 /** 标准 QWERTY 兜底行（3 字母行 + 控制行）。 */
-internal val DEFAULT_QWERTY_ROWS: List<List<String>> = listOf(
-    listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p"),
-    listOf("a", "s", "d", "f", "g", "h", "j", "k", "l"),
-    listOf("z", "x", "c", "v", "b", "n", "m"),
-    listOf("mode_change", "comma", "space", "earth", "enter"),
+internal val DEFAULT_QWERTY_ROWS: List<KeyboardRow> = listOf(
+    KeyboardRow(listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p")),
+    KeyboardRow(listOf("a", "s", "d", "f", "g", "h", "j", "k", "l")),
+    KeyboardRow(listOf("z", "x", "c", "v", "b", "n", "m")),
+    KeyboardRow(listOf("mode_change", "comma", "space", "earth", "enter")),
 )
 
 /**
  * 规范化键盘行：按配置取行（最多 [MAX_QWERTY_ROWS] 行），缺失的行用内置默认补齐，
  * 因此少于 4 行时会补出默认控制行；多出的行（如可选数字行）原样保留。
  */
-internal fun normalizeQwertyRows(rows: List<List<String>>): List<List<String>> {
-    val out = ArrayList<List<String>>(MAX_QWERTY_ROWS)
+internal fun normalizeQwertyRows(rows: List<KeyboardRow>): List<KeyboardRow> {
+    val out = ArrayList<KeyboardRow>(MAX_QWERTY_ROWS)
     for (i in 0 until MAX_QWERTY_ROWS) {
         val row = rows.getOrNull(i) ?: DEFAULT_QWERTY_ROWS.getOrNull(i) ?: break
-        if (row.isEmpty()) break
+        if (row.keys.isEmpty()) break
         out.add(row)
     }
     return out.ifEmpty { DEFAULT_QWERTY_ROWS }
@@ -765,16 +769,33 @@ internal fun normalizeQwertyRows(rows: List<List<String>>): List<List<String>> {
  * 横屏行：在 [normalizeQwertyRows] 基础上，若整份布局不含任何功能键（如合并键布局只有字母行），
  * 在最后一个字母行两端补 `shift` / `delete`。
  */
-internal fun landscapeQwertyRows(rows: List<List<String>>): List<List<String>> {
+internal fun landscapeQwertyRows(rows: List<KeyboardRow>): List<KeyboardRow> {
     val normalized = normalizeQwertyRows(rows)
     if (normalized.size < 2) return normalized
     // 忽略末尾控制行：只要其余行都不含功能键（纯字母布局），就在最后一个字母行两端补 shift/delete
     val contentRows = normalized.dropLast(1)
-    val hasFunction = contentRows.any { r -> r.any { it in KeysConfigHelper.FUNCTION_KEY_IDS } }
+    val hasFunction = contentRows.any { r -> r.keys.any { it in KeysConfigHelper.FUNCTION_KEY_IDS } }
     if (hasFunction) return normalized
     val letterIdx = normalized.lastIndex - 1
     return normalized.mapIndexed { idx, r ->
-        if (idx == letterIdx) listOf("shift") + r + listOf("delete") else r
+        if (idx == letterIdx) r.copy(keys = listOf("shift") + r.keys + listOf("delete")) else r
+    }
+}
+
+/**
+ * 行的宽度占比（0..1）：
+ * 1. 行级 `width` 显式优先；
+ * 2. 含功能键的行铺满（功能键按权重分配，行不能缩进）；
+ * 3. 否则按行级/键盘级 align：`uniform` = 键数/列数（键宽与列对齐、行居中），`stretch` = 铺满。
+ * 判定纯函数化便于单测。
+ */
+internal fun rowWidthFraction(row: KeyboardRow, columns: Int, defaultAlign: RowAlign): Float {
+    row.width?.let { return it.coerceIn(0f, 1f) }
+    if (row.keys.any { it in KeysConfigHelper.FUNCTION_KEY_IDS }) return 1f
+    return when (row.align ?: defaultAlign) {
+        RowAlign.STRETCH -> 1f
+        RowAlign.UNIFORM ->
+            if (columns > 0) (row.keys.size.toFloat() / columns).coerceIn(0f, 1f) else 1f
     }
 }
 
@@ -1991,7 +2012,7 @@ private fun LandscapeKeyboardContent(
     callbacks: KeyboardCallbacks,
     uiState: KeyboardUiState,
     isAsciiMode: Boolean,
-    keyRows: List<List<String>>,
+    keyRows: List<KeyboardRow>,
     configVersion: Int = 0,
     onSwipeStateChange: ((SwipeState, Rect) -> Unit)? = null,
 ) {
@@ -2072,7 +2093,7 @@ private fun LandscapeKeyboardContent(
                 .padding(start = 4.dp),
         ) {
             landscapeRows.forEachIndexed { idx, row ->
-                val (left, _) = splitRowForLandscape(row)
+                val (left, _) = splitRowForLandscape(row.keys)
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -2092,7 +2113,7 @@ private fun LandscapeKeyboardContent(
                 .padding(end = 4.dp),
         ) {
             landscapeRows.forEachIndexed { idx, row ->
-                val (_, right) = splitRowForLandscape(row)
+                val (_, right) = splitRowForLandscape(row.keys)
                 Box(
                     modifier = Modifier
                         .weight(1f)

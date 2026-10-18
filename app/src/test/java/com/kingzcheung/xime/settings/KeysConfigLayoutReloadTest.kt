@@ -64,7 +64,7 @@ class KeysConfigLayoutReloadTest {
 
         assertEquals(
             listOf("a", "s", "d", "f", "g", "h", "j", "k", "l", ";"),
-            KeysConfigHelper.getKeyRows(false)[1],
+            KeysConfigHelper.getRowsLayout(false).rows[1].keys,
         )
     }
 }
