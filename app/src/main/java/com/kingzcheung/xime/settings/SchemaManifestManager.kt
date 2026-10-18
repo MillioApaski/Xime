@@ -191,7 +191,7 @@ object SchemaManifestManager {
 
             val sharedFiles = sharedFileNames(context)
             for (fileName in extractedFiles) {
-                // 共享文件（symbols/default 等）只有与 app 基线不同才算「覆盖」，需要留档以便卸载回滚
+                // 共享文件只有与基线不同才算覆盖（留档以便卸载回滚）
                 if (fileName in sharedFiles &&
                     !SharedPresetOverrides.recordIfOverrides(context, schemeId, fileName)) continue
                 val file = File(rimeDir, fileName)
@@ -276,7 +276,7 @@ object SchemaManifestManager {
         }
     }
 
-    /** app 内置共享文件（见 [RimeSharedFiles]）：清单只记「覆盖版本」，卸载回滚、不删除。 */
+    /** app 内置共享文件（见 [RimeSharedFiles]）。 */
     fun sharedFileNames(context: Context): Set<String> = RimeSharedFiles.names(context)
 
     // ── Uninstall Using Manifest ──
@@ -320,8 +320,7 @@ object SchemaManifestManager {
 
             var deletedCount = 0
 
-            // app 内置共享文件被方案包声明过也不能删：别的方案 __include 它们，删了会编译失败。
-            // 若当前生效的是本包的覆盖版本，回滚到其它包的最新覆盖或 app 基线
+            // 共享文件不随方案卸载删除；若生效的是本包覆盖版本则先回滚
             val builtinFiles = sharedFileNames(context)
             val overriddenShared = files.keys().asSequence().filter { it in builtinFiles }.toList()
             if (overriddenShared.isNotEmpty()) {

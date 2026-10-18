@@ -66,6 +66,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kingzcheung.xime.settings.SettingsPreferences
 import com.kingzcheung.xime.viewmodel.LocalPackageItem
+import com.kingzcheung.xime.viewmodel.LocalPackagePhase
 import com.kingzcheung.xime.viewmodel.SchemaLocalViewModel
 import com.kingzcheung.xime.viewmodel.SchemaSettingsViewModel
 
@@ -423,7 +424,7 @@ fun SchemaLocalContent(
                     items(uiState.packages, key = { it.packageId }) { item ->
                         LocalPackageCard(
                             item = item,
-                            installing = uiState.installingId == item.packageId,
+                            phase = if (uiState.installingId == item.packageId) uiState.phase else null,
                             onInstall = { viewModel.installPackage(item) },
                             onDelete = { viewModel.deleteDownloaded(item) },
                             onUninstall = { viewModel.uninstall(item) },
@@ -438,7 +439,7 @@ fun SchemaLocalContent(
 @Composable
 private fun LocalPackageCard(
     item: LocalPackageItem,
-    installing: Boolean,
+    phase: LocalPackagePhase?,
     onInstall: () -> Unit,
     onDelete: () -> Unit,
     onUninstall: () -> Unit,
@@ -495,11 +496,17 @@ private fun LocalPackageCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 when {
-                    installing -> {
+                    phase != null -> {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                             Spacer(Modifier.width(6.dp))
-                            Text("安装中…", style = MaterialTheme.typography.labelSmall)
+                            Text(
+                                when (phase) {
+                                    LocalPackagePhase.INSTALLING -> "安装中…"
+                                    LocalPackagePhase.DEPLOYING -> "部署中…"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                            )
                         }
                     }
                     item.installed -> {

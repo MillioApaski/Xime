@@ -8,6 +8,7 @@ import com.kingzcheung.xime.settings.FileConflictInfo
 import com.kingzcheung.xime.settings.SchemaManifestManager
 import com.kingzcheung.xime.settings.SchemaManager
 import com.kingzcheung.xime.settings.SchemaManager.InstallFromDirResult
+import com.kingzcheung.xime.rime.RimeConfigHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,10 +36,14 @@ data class LocalPackageItem(
         }
 }
 
+/** 本地包操作阶段（安装与部署分开显示）。 */
+enum class LocalPackagePhase { INSTALLING, DEPLOYING }
+
 data class SchemaLocalUiState(
     val packages: List<LocalPackageItem> = emptyList(),
     val isLoading: Boolean = false,
     val installingId: String? = null,
+    val phase: LocalPackagePhase? = null,
     val errorMessage: String? = null,
     val toastMessage: String? = null,
     val conflictPackageId: String? = null,
@@ -90,14 +95,14 @@ class SchemaLocalViewModel(application: Application) : AndroidViewModel(applicat
     fun installPackage(item: LocalPackageItem) {
         if (_uiState.value.installingId != null) return
         viewModelScope.launch {
-            _uiState.update { it.copy(installingId = item.packageId) }
+            _uiState.update { it.copy(installingId = item.packageId, phase = LocalPackagePhase.INSTALLING) }
 
             // 检查 rime/ 下是否已有其他方案（无论是否被清单追踪）
             val hasSchemas = withContext(Dispatchers.IO) {
                 SchemaManager.discoverSchemas(context).isNotEmpty()
             }
             if (hasSchemas) {
-                _uiState.update { it.copy(installingId = null) }
+                _uiState.update { it.copy(installingId = null, phase = null) }
                 val otherInstalled = withContext(Dispatchers.IO) {
                     SchemaManifestManager.getInstalledPackages(context)
                         .map { it.packageId }
@@ -113,7 +118,7 @@ class SchemaLocalViewModel(application: Application) : AndroidViewModel(applicat
                 return@launch
             }
 
-            // 直接安装（后续由 UI 提示用户部署）
+            // 直接安装，成功后自动部署
             val result = try {
                 withContext(Dispatchers.IO) {
                     SchemaManager.installPackageFromMarketDir(
@@ -128,10 +133,14 @@ class SchemaLocalViewModel(application: Application) : AndroidViewModel(applicat
                 android.util.Log.e("SchemaLocalViewModel", "installPackage exception", e)
                 InstallFromDirResult(success = false, failureReason = "安装异常: ${e.message}")
             }
-            _uiState.update { st -> st.copy(installingId = null) }
             if (result.success) {
+                // 装完即部署，用户常忘记点「部署」
+                _uiState.update { st -> st.copy(phase = LocalPackagePhase.DEPLOYING) }
+                val deployed = deployAfterInstall()
+                _uiState.update { st -> st.copy(installingId = null, phase = null) }
                 val msg = buildString {
-                    append("已安装「${item.displayName}」，点「部署」生效")
+                    append(if (deployed) "已安装「${item.displayName}」并完成部署"
+                           else "已安装「${item.displayName}」，请点「部署」生效")
                     if (result.parseFailures.isNotEmpty()) {
                         append("\n以下方案解析失败：")
                         result.parseFailures.forEach { append("\n  · $it") }
@@ -139,6 +148,7 @@ class SchemaLocalViewModel(application: Application) : AndroidViewModel(applicat
                 }
                 showToast(msg)
             } else if (result.conflicts.isNotEmpty()) {
+                _uiState.update { st -> st.copy(installingId = null, phase = null) }
                 // 注册表冲突 → 进入冲突解决流程
                 val otherInstalled = withContext(Dispatchers.IO) {
                     SchemaManifestManager.getInstalledPackages(context)
@@ -158,6 +168,7 @@ class SchemaLocalViewModel(application: Application) : AndroidViewModel(applicat
                     )
                 }
             } else {
+                _uiState.update { st -> st.copy(installingId = null, phase = null) }
                 showToast(result.failureReason ?: "安装失败")
             }
             loadLocalPackages()
@@ -169,7 +180,9 @@ class SchemaLocalViewModel(application: Application) : AndroidViewModel(applicat
         val pkgId = _uiState.value.conflictPackageId ?: return
         val item = _uiState.value.packages.firstOrNull { it.packageId == pkgId } ?: return
         viewModelScope.launch {
-            _uiState.update { it.copy(conflictPackageId = null, installingId = pkgId) }
+            _uiState.update {
+                it.copy(conflictPackageId = null, installingId = pkgId, phase = LocalPackagePhase.INSTALLING)
+            }
             for (sid in _uiState.value.conflictingSchemeIds) {
                 val uninstallOk = withContext(Dispatchers.IO) {
                     try {
@@ -183,7 +196,7 @@ class SchemaLocalViewModel(application: Application) : AndroidViewModel(applicat
                 }
                 if (!uninstallOk) {
                     _uiState.update {
-                        it.copy(installingId = null, conflictPackageId = null, conflictingSchemeIds = emptyList())
+                        it.copy(installingId = null, phase = null, conflictPackageId = null, conflictingSchemeIds = emptyList())
                     }
                     showToast("卸载冲突方案「$sid」失败，安装已取消")
                     loadLocalPackages()
@@ -204,10 +217,15 @@ class SchemaLocalViewModel(application: Application) : AndroidViewModel(applicat
                 android.util.Log.e("SchemaLocalViewModel", "confirmInstallWithUninstall exception", e)
                 InstallFromDirResult(success = false, failureReason = "安装异常: ${e.message}")
             }
-            _uiState.update { st -> st.copy(installingId = null, conflictingSchemeIds = emptyList()) }
             if (result.success) {
+                _uiState.update { st -> st.copy(phase = LocalPackagePhase.DEPLOYING) }
+                val deployed = deployAfterInstall()
+                _uiState.update { st ->
+                    st.copy(installingId = null, phase = null, conflictingSchemeIds = emptyList())
+                }
                 val msg = buildString {
-                    append("已安装「${item.displayName}」，点「部署」生效")
+                    append(if (deployed) "已安装「${item.displayName}」并完成部署"
+                           else "已安装「${item.displayName}」，请点「部署」生效")
                     if (result.parseFailures.isNotEmpty()) {
                         append("\n以下方案解析失败：")
                         result.parseFailures.forEach { append("\n  · $it") }
@@ -215,6 +233,7 @@ class SchemaLocalViewModel(application: Application) : AndroidViewModel(applicat
                 }
                 showToast(msg)
             } else {
+                _uiState.update { st -> st.copy(installingId = null, phase = null, conflictingSchemeIds = emptyList()) }
                 val reason = if (result.failureReason != null) {
                     result.failureReason
                 } else if (result.conflicts.isNotEmpty()) {
@@ -226,6 +245,11 @@ class SchemaLocalViewModel(application: Application) : AndroidViewModel(applicat
             }
             loadLocalPackages()
         }
+    }
+
+    /** 安装后自动部署；失败不抛异常，调用方回退为提示手动部署。 */
+    private suspend fun deployAfterInstall(): Boolean = withContext(Dispatchers.IO) {
+        runCatching { RimeConfigHelper.deployInstalledSchema(context) }.getOrDefault(false)
     }
 
     fun cancelConflictInstall() {

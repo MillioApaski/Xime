@@ -36,4 +36,10 @@ class RimeSharedFilesTest {
         assertTrue(RimeSharedFiles.isSharedEntry("default.yaml", isDirectory = false))
         assertTrue(RimeSharedFiles.isSharedEntry("essay.txt", isDirectory = false))
     }
+
+    @Test
+    fun `文档类文件不算共享文件`() {
+        assertFalse(RimeSharedFiles.isSharedEntry("README.md", isDirectory = false))
+        assertFalse(RimeSharedFiles.isSharedEntry("LICENSE", isDirectory = false))
+    }
 }

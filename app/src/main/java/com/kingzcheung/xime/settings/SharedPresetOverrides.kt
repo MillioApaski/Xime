@@ -6,12 +6,8 @@ import java.io.File
 import java.security.MessageDigest
 
 /**
- * 方案包对内置共享文件（[RimeSharedFiles]：symbols.yaml、default.yaml 等）的覆盖。
- *
- * 共享文件在 Rime 里只有一份、全局生效，所以策略是「允许覆盖 + 按包留档 + 可回滚」：
- * - 安装：包内版本与 app 基线不同才记为覆盖，并把该版本留存到 `.package-presets/<包>/`；
- * - 卸载：若当前生效的正是该包版本，改用其它包留存的最新版本，没有则回 app 基线；
- * - app 升级同步基线时：有覆盖生效就跳过该文件，避免冲掉第三方定制。
+ * 方案包对内置共享文件的覆盖：允许覆盖（全局生效），按包留档到 `.package-presets/<包>/`，
+ * 卸载时回滚到其它包的最新版本或 app 基线，app 升级同步基线时跳过生效中的覆盖。
  */
 internal object SharedPresetOverrides {
     private const val TAG = "SharedPresetOverrides"
@@ -22,9 +18,7 @@ internal object SharedPresetOverrides {
     private fun storeRoot(context: Context) = File(rimeDir(context), STORE_DIR)
     private fun packageStore(context: Context, packageId: String) = File(storeRoot(context), packageId)
 
-    /**
-     * 安装后登记：包内版本与 app 基线不同则留存副本，返回是否属于覆盖。
-     */
+    /** 安装后登记：与基线不同才留档，返回是否属于覆盖。 */
     fun recordIfOverrides(context: Context, packageId: String, fileName: String): Boolean {
         val installed = File(rimeDir(context), fileName)
         if (!installed.isFile) return false
@@ -38,16 +32,14 @@ internal object SharedPresetOverrides {
         return true
     }
 
-    /** 当前生效内容是否来自某个包的覆盖（app 升级同步基线时据此跳过，避免冲掉定制）。 */
+    /** 当前生效内容是否来自某个包的覆盖（升级同步基线时据此跳过）。 */
     fun hasActiveOverride(context: Context, fileName: String): Boolean {
         val flatSha = sha256(File(rimeDir(context), fileName)) ?: return false
         val stores = storeRoot(context).listFiles() ?: return false
         return stores.any { dir -> sha256(File(dir, fileName)) == flatSha }
     }
 
-    /**
-     * 卸载某包后的恢复：当前生效的就是该包版本时，切到其它包留存的最新版本，没有则回 app 基线。
-     */
+    /** 卸载后的回滚：生效版本属于该包时，切到其它包的最新覆盖，没有则回 app 基线。 */
     fun restoreAfterUninstall(context: Context, packageId: String, fileNames: Collection<String>) {
         val flatDir = rimeDir(context)
         val ownStore = packageStore(context, packageId)
@@ -73,7 +65,7 @@ internal object SharedPresetOverrides {
         ownStore.deleteRecursively()
     }
 
-    /** 清掉某包的覆盖留档（卸载收尾）。 */
+    /** 清掉某包的覆盖留档。 */
     fun removePackage(context: Context, packageId: String) {
         packageStore(context, packageId).deleteRecursively()
     }
