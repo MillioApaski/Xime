@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.twotone.DataUsage
 import androidx.compose.material.icons.twotone.Image
+import androidx.compose.material.icons.twotone.Lock
 import androidx.compose.material.icons.twotone.Sync
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -51,7 +52,7 @@ import kotlinx.coroutines.withContext
 /**
  * 剪贴板设置（设置 → 数据与同步 → 剪贴板）。
  *
- * 页面只保留"需要用户决定/只有此处能看到"的东西：图片采集开关、单张上限，
+ * 页面只保留"需要用户决定/只有此处能看到"的东西：图片采集开关、敏感内容开关、单张上限，
  * 以及调上限时作为参照的图片占用；**清理不在这里**——剪贴板历史（文字 + 图片 + 残留）
  * 统一在 关于 → 存储空间 → 「剪贴板历史」清理，避免两个入口做同一件事。
  * 其余限制（最长边 / 保留数量 / 总容量）是内置常量，不暴露也不罗列。
@@ -69,6 +70,9 @@ fun ClipboardSettingsContent(
 
     var captureEnabled by remember {
         mutableStateOf(SettingsPreferences.isClipboardImageCaptureEnabled(context))
+    }
+    var sensitiveCaptureEnabled by remember {
+        mutableStateOf(SettingsPreferences.isClipboardSensitiveCaptureEnabled(context))
     }
     var maxMb by remember {
         mutableFloatStateOf(SettingsPreferences.getClipboardImageMaxMb(context).toFloat())
@@ -135,6 +139,30 @@ fun ClipboardSettingsContent(
                     if (!captureEnabled) {
                         Text(
                             text = "已关闭：只收集文字，复制图片不会再进入剪贴板历史。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                        )
+                    }
+                }
+            )
+
+            SettingsSection(
+                title = "敏感内容",
+                content = {
+                    SettingsToggleItem(
+                        icon = Icons.TwoTone.Lock,
+                        title = "记录密码等敏感内容",
+                        subtitle = "默认不保存密码管理器标记为敏感的剪贴板（密码、卡号等）",
+                        checked = sensitiveCaptureEnabled,
+                        onCheckedChange = { checked ->
+                            sensitiveCaptureEnabled = checked
+                            SettingsPreferences.setClipboardSensitiveCaptureEnabled(context, checked)
+                        }
+                    )
+                    if (sensitiveCaptureEnabled) {
+                        Text(
+                            text = "已开启：敏感内容会保存进历史，启用剪贴板同步时也会上传。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)

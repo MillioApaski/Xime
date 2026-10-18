@@ -131,9 +131,11 @@ class ClipboardManager private constructor(private val context: Context) {
             if (clipData != null && clipData.itemCount > 0) {
                 val description = clipData.description
 
-                // 敏感剪贴板（密码管理器等，API 33+ 系统标记）不入库
-                if (isSensitiveClip(description)) {
-                    Log.d(TAG, "Sensitive clip ignored")
+                // 敏感剪贴板（密码等，API 33+ 系统标记）默认不入库，设置页可开
+                if (isSensitiveClip(description) &&
+                    !SettingsPreferences.isClipboardSensitiveCaptureEnabled(context)
+                ) {
+                    Log.d(TAG, "Sensitive clip ignored (setting off)")
                     clearSelfClipboardImage()
                     return
                 }
