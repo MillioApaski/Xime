@@ -247,6 +247,10 @@ fun KeyboardLayoutScreen(
                     isFloatingMode = uiState.isFloatingMode,
                     specialKeyTextColor = specialKeyTextColor,
                     onGestureAction = onGestureAction,
+                    schemaName = uiState.schemaName,
+                    isSttEnabled = uiState.isSttEnabled,
+                    voiceSticky = uiState.voiceSticky,
+                    onVoiceModeChange = callbacks.onVoiceModeChange,
                 )
             }
 
