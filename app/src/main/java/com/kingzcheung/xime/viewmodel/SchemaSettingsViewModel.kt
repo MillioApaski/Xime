@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kingzcheung.xime.plugin.core.runtime.PluginManager
 import com.kingzcheung.xime.rime.RimeConfigHelper
+import com.kingzcheung.xime.util.FileLogger
 import com.kingzcheung.xime.rime.RimeEngine
 import com.kingzcheung.xime.settings.MarketUpdateChecker
 import com.kingzcheung.xime.settings.FileConflictInfo
@@ -215,7 +216,9 @@ class SchemaSettingsViewModel(application: Application) : AndroidViewModel(appli
         if (_uiState.value.isDeploying) return
         viewModelScope.launch {
             _uiState.update { it.copy(isDeploying = true) }
-            val success = withContext(Dispatchers.IO) {
+            val (success, missingReverseDicts) = withContext(Dispatchers.IO) {
+                // 先补齐内置基础文件（symbols/default 等），避免方案 __include 失败导致编译报错
+                RimeConfigHelper.ensureBuiltinBaseFiles(context)
                 PersonalDictManager.ensureSchemaPacks(context)
                 KeysConfigHelper.loadConfig(context)
                 KeyboardThemes.reload(context)
@@ -224,10 +227,23 @@ class SchemaSettingsViewModel(application: Application) : AndroidViewModel(appli
                 if (deployed) {
                     RimeConfigHelper.storeDeploymentHash(context)
                 }
-                deployed
+                deployed to RimeConfigHelper.missingReverseLookupTables(context)
             }
             _uiState.update { it.copy(isDeploying = false) }
-            showToast(if (success) "部署完成" else "部署失败")
+            val missing = missingReverseDicts.map { it.second }.distinct()
+            if (missing.isNotEmpty()) {
+                FileLogger.w(
+                    "SchemaSettings", "部署后反查词典仍缺编译产物: $missing（对应方案: ${missingReverseDicts.map { it.first }.distinct()}）"
+                )
+            }
+            showToast(
+                when {
+                    !success -> "部署失败"
+                    missing.isEmpty() -> "部署完成"
+                    // 反查词典由它自己的方案编译：缺产物时运行期会报 table.bin 不存在
+                    else -> "部署完成，反查词典未编译：${missing.joinToString("、")}（需安装并启用对应方案）"
+                }
+            )
             refresh()
         }
     }

@@ -189,7 +189,11 @@ object SchemaManifestManager {
             val rimeDir = SchemaManager.getRimeDir(context)
             val fileEntries = JSONObject()
 
+            val sharedFiles = sharedFileNames(context)
             for (fileName in extractedFiles) {
+                // 共享文件（symbols/default 等）只有与 app 基线不同才算「覆盖」，需要留档以便卸载回滚
+                if (fileName in sharedFiles &&
+                    !SharedPresetOverrides.recordIfOverrides(context, schemeId, fileName)) continue
                 val file = File(rimeDir, fileName)
                 if (!file.exists()) continue
                 val sha256 = fileSha256(file) ?: continue
@@ -272,6 +276,9 @@ object SchemaManifestManager {
         }
     }
 
+    /** app 内置共享文件（见 [RimeSharedFiles]）：清单只记「覆盖版本」，卸载回滚、不删除。 */
+    fun sharedFileNames(context: Context): Set<String> = RimeSharedFiles.names(context)
+
     // ── Uninstall Using Manifest ──
 
     /**
@@ -313,6 +320,14 @@ object SchemaManifestManager {
 
             var deletedCount = 0
 
+            // app 内置共享文件被方案包声明过也不能删：别的方案 __include 它们，删了会编译失败。
+            // 若当前生效的是本包的覆盖版本，回滚到其它包的最新覆盖或 app 基线
+            val builtinFiles = sharedFileNames(context)
+            val overriddenShared = files.keys().asSequence().filter { it in builtinFiles }.toList()
+            if (overriddenShared.isNotEmpty()) {
+                SharedPresetOverrides.restoreAfterUninstall(context, schemeId, overriddenShared)
+            }
+
             // 删除清单记录的文件（检查 registry claimedBy，多包共享时不删除）
             val keysIt2 = files.keys()
             while (keysIt2.hasNext()) {
@@ -323,7 +338,11 @@ object SchemaManifestManager {
                     if (arr != null) jsonArrayToList(arr) else emptyList()
                 } else emptyList()
 
-                if (claimants.size <= 1 || (claimants.size == 1 && claimants[0] == schemeId)) {
+                if (builtinFiles.contains(fn)) {
+                    // 共享文件：只解除当前包的声明，内容回滚在循环前统一处理
+                    if (claimants.size <= 1) allFiles.remove(fn)
+                    else claimEntry!!.put("claimedBy", JSONArray(claimants.filter { it != schemeId }))
+                } else if (claimants.size <= 1 || (claimants.size == 1 && claimants[0] == schemeId)) {
                     val file = File(rimeDir, fn)
                     if (file.exists()) { file.delete(); deletedCount++ }
                     allFiles.remove(fn)
@@ -367,6 +386,7 @@ object SchemaManifestManager {
             registry.put("files", allFiles)
             saveRegistry(context, registry)
             getManifestFile(context, schemeId).delete()
+            SharedPresetOverrides.removePackage(context, schemeId)
 
             Log.i(TAG, "uninstalled $schemeId: $deletedCount files removed")
             UninstallResult(

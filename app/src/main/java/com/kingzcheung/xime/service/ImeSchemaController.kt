@@ -310,7 +310,9 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
             KeyboardThemes.reload(service)
             
             service.notifyDeploymentStatus(true, "正在部署...")
-            
+            // 先补齐内置基础文件（symbols/default 等），避免方案 __include 失败导致编译报错
+            RimeConfigHelper.ensureBuiltinBaseFiles(service)
+
             val success = service.rimeEngine.deploy()
             
             withContext(Dispatchers.Main) {

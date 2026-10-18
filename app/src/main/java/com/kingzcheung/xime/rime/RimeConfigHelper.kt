@@ -8,8 +8,10 @@ import com.kingzcheung.xime.settings.PersonalDictManager
 import com.kingzcheung.xime.settings.SchemaConfigHelper
 import com.kingzcheung.xime.settings.SchemaManifestManager
 import com.kingzcheung.xime.settings.MarketVersionStore
+import com.kingzcheung.xime.settings.RimeDependencyResolver
 import com.kingzcheung.xime.settings.SchemaManager
 import com.kingzcheung.xime.settings.SettingsPreferences
+import com.kingzcheung.xime.settings.SharedPresetOverrides
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -68,6 +70,10 @@ object RimeConfigHelper {
      */
     fun ensureDeployment(context: Context): Boolean {
         synchronized(deploymentLock) {
+            if (ensureBuiltinBaseFiles(context) > 0) {
+                // 基础文件是刚补回来的：旧的部署 hash 与产物已不可信，强制重编
+                SettingsPreferences.setDeploymentHash(context, "")
+            }
             val currentHash = computeDeploymentHash(context)
             if (currentHash.isNotEmpty() && currentHash == SettingsPreferences.getDeploymentHash(context)) {
                 SettingsPreferences.setDeploymentDone(context, true)
@@ -267,6 +273,13 @@ object RimeConfigHelper {
             fileUpdateDigest(digest, defaultCustomYaml)
         }
 
+        // 方案普遍 __include: symbols:/，其变化/补齐同样要触发方案重编
+        val symbolsYaml = File(rimeDir, "symbols.yaml")
+        if (symbolsYaml.exists()) {
+            digest.update("symbols".toByteArray())
+            fileUpdateDigest(digest, symbolsYaml)
+        }
+
         return digest.digest().joinToString("") { String.format("%02x", it) }
     }
 
@@ -450,6 +463,8 @@ object RimeConfigHelper {
                     // T9 注入与个人词库 packs），覆盖会抹掉用户配置与第三方方案——
                     // 一律排除出默认覆盖范围
                     if (fileName.endsWith(".custom.yaml")) continue
+                    // 共享预设正被某个方案包覆盖（生效中）：保留第三方内容，不拿基线覆盖
+                    if (assetSub.isEmpty() && SharedPresetOverrides.hasActiveOverride(context, fileName)) continue
                     if (!childTarget.exists() || !assetContentEquals(context, "$ASSETS_RIME_DIR/$childAsset", childTarget)) {
                         copyAssetFile(context, "$ASSETS_RIME_DIR/$childAsset", childTarget)
                         updated++
@@ -459,6 +474,59 @@ object RimeConfigHelper {
         }
         sync("", targetDir)
         return updated
+    }
+
+    /**
+     * 补齐内置共享文件（只补缺失/空文件，不覆盖已有内容）。
+     *
+     * 第三方方案普遍 `__include: symbols:/`、`default:/` 引用这些基线文件；它们被方案包卸载
+     * 删掉或误删后，部署会报 `resource could not be loaded`，该方案配置编译失败。
+     *
+     * @return 补齐的文件数
+     */
+    fun ensureBuiltinBaseFiles(context: Context): Int {
+        val rimeDir = File(context.filesDir, "rime")
+        if (!rimeDir.exists()) rimeDir.mkdirs()
+        var restored = 0
+        for (name in SchemaManifestManager.sharedFileNames(context)) {
+            val target = File(rimeDir, name)
+            if (target.isFile && target.length() > 0L) continue
+            copyAssetFile(context, "$ASSETS_RIME_DIR/$name", target)
+            if (target.isFile && target.length() > 0L) {
+                restored++
+                FileLogger.w(TAG, "Restored missing builtin file: $name")
+            }
+        }
+        return restored
+    }
+
+    /**
+     * 已启用方案引用、但缺少编译产物 `build/<dict>.table.bin` 的反查词典。
+     *
+     * librime 部署时只编译每个方案的 `translator/dictionary`（见 deployment_tasks.cc
+     * 的 SchemaUpdate），反查词典（`reverse_lookup/dictionary`）只有在它自己的方案被部署时
+     * 才生成 table.bin。缺产物时运行期会反复报
+     * `attempt to open non-existent file /build/<dict>.table.bin`。
+     *
+     * @return 方案 id → 缺失的反查词典名
+     */
+    fun missingReverseLookupTables(context: Context): List<Pair<String, String>> {
+        val rimeDir = File(context.filesDir, "rime")
+        val buildDir = File(rimeDir, "build")
+        val missing = mutableListOf<Pair<String, String>>()
+        for (schemaId in SchemaManager.getEnabledSchemas(context)) {
+            val schemaFile = File(rimeDir, "$schemaId.schema.yaml")
+            if (!schemaFile.isFile) continue
+            val refs = try {
+                RimeDependencyResolver.scanSchemaRefs(schemaFile.readText(), null)
+            } catch (e: IOException) {
+                continue
+            }
+            for (dict in refs.reverseDicts) {
+                if (!File(buildDir, "$dict.table.bin").exists()) missing.add(schemaId to dict)
+            }
+        }
+        return missing
     }
 
     /** assets 文件与本地文件内容逐块比对（流式，避免大词典整读进内存）。 */
