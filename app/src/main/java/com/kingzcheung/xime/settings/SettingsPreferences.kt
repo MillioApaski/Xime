@@ -847,6 +847,19 @@ object SettingsPreferences {
             .apply()
     }
 
+    // ── 敏感剪贴板（API 33+ EXTRA_IS_SENSITIVE，默认不入库） ──────────
+
+    /** 是否记录带敏感标记的剪贴板（密码、卡号等，默认关）。 */
+    private const val KEY_CLIPBOARD_SENSITIVE_CAPTURE = "clipboard_sensitive_capture"
+
+    fun isClipboardSensitiveCaptureEnabled(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_CLIPBOARD_SENSITIVE_CAPTURE, false)
+    }
+
+    fun setClipboardSensitiveCaptureEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_CLIPBOARD_SENSITIVE_CAPTURE, enabled).apply()
+    }
+
     const val KEY_BACKUP_PLUGIN_ID = "backup_plugin_id"
 
     fun getBackupPluginId(context: Context): String {
