@@ -1300,17 +1300,20 @@ public:
     //    候选数漂移回方案自带值（内置/第三方方案多为 PC 默认 5，不适配手机）。
     void applyPageSizeOverride(const char *schema_id)
     {
-        if (!rime || page_size_override_ <= 0)
+        if (!rime || page_size_override_ <= 0 || !schema_id)
             return;
+        // 先拷贝：入参可能来自旧 Schema 的 schema_id()，下面 ApplySchema 会释放它，
+        // 直接沿用指针会读到已释放内存（日志里出现 '0s$~'、'h?|' 这类乱码方案 id 即是此因）
+        const std::string sid(schema_id);
         RimeConfig config;
-        if (rime->schema_open(schema_id, &config))
+        if (rime->schema_open(sid.c_str(), &config))
         {
             rime->config_set_int(&config, "menu/page_size", page_size_override_);
             rime->config_close(&config);
         }
         else
         {
-            LOGE("applyPageSizeOverride: schema_open failed for '%s'", schema_id);
+            LOGE("applyPageSizeOverride: schema_open failed for '%s'", sid.c_str());
         }
         if (!session_id_)
             return;
@@ -1321,11 +1324,11 @@ public:
         auto schema = session->schema();
         // 仅当会话正用该方案时幂等刷新（重构造 Schema 读到覆盖值）；
         // 目标方案与当前不同时只写缓存，随后的 switchSchema 自然生效
-        if (!schema || schema->schema_id() != schema_id)
+        if (!schema || schema->schema_id() != sid)
             return;
-        session->ApplySchema(new rime::Schema(schema->schema_id()));
+        session->ApplySchema(new rime::Schema(sid));
         LOGI("applyPageSizeOverride: re-applied schema '%s' (menu/page_size=%d)",
-             schema_id, page_size_override_);
+             sid.c_str(), page_size_override_);
     }
 
     // 会话重建（创建/部署）后重新对齐覆盖值；无覆盖值时为空操作

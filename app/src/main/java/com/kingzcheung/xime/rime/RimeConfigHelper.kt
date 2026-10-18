@@ -70,10 +70,8 @@ object RimeConfigHelper {
      */
     fun ensureDeployment(context: Context): Boolean {
         synchronized(deploymentLock) {
-            if (ensureBuiltinBaseFiles(context) > 0) {
-                // 基础文件是刚补回来的：旧的部署 hash 与产物已不可信，强制重编
-                SettingsPreferences.setDeploymentHash(context, "")
-            }
+            // 刚补回基础文件：旧 hash 与产物已不可信，强制重编
+            if (ensureBuiltinBaseFiles(context) > 0) SettingsPreferences.setDeploymentHash(context, "")
             val currentHash = computeDeploymentHash(context)
             if (currentHash.isNotEmpty() && currentHash == SettingsPreferences.getDeploymentHash(context)) {
                 SettingsPreferences.setDeploymentDone(context, true)
@@ -273,7 +271,7 @@ object RimeConfigHelper {
             fileUpdateDigest(digest, defaultCustomYaml)
         }
 
-        // 方案普遍 __include: symbols:/，其变化/补齐同样要触发方案重编
+        // 方案普遍 __include: symbols:/，其变化也要触发重编
         val symbolsYaml = File(rimeDir, "symbols.yaml")
         if (symbolsYaml.exists()) {
             digest.update("symbols".toByteArray())
@@ -463,7 +461,7 @@ object RimeConfigHelper {
                     // T9 注入与个人词库 packs），覆盖会抹掉用户配置与第三方方案——
                     // 一律排除出默认覆盖范围
                     if (fileName.endsWith(".custom.yaml")) continue
-                    // 共享预设正被某个方案包覆盖（生效中）：保留第三方内容，不拿基线覆盖
+                    // 共享预设正被方案包覆盖：保留第三方内容
                     if (assetSub.isEmpty() && SharedPresetOverrides.hasActiveOverride(context, fileName)) continue
                     if (!childTarget.exists() || !assetContentEquals(context, "$ASSETS_RIME_DIR/$childAsset", childTarget)) {
                         copyAssetFile(context, "$ASSETS_RIME_DIR/$childAsset", childTarget)
@@ -476,14 +474,7 @@ object RimeConfigHelper {
         return updated
     }
 
-    /**
-     * 补齐内置共享文件（只补缺失/空文件，不覆盖已有内容）。
-     *
-     * 第三方方案普遍 `__include: symbols:/`、`default:/` 引用这些基线文件；它们被方案包卸载
-     * 删掉或误删后，部署会报 `resource could not be loaded`，该方案配置编译失败。
-     *
-     * @return 补齐的文件数
-     */
+    /** 补齐缺失/空的内置共享文件（不覆盖已有内容），返回补齐数。 */
     fun ensureBuiltinBaseFiles(context: Context): Int {
         val rimeDir = File(context.filesDir, "rime")
         if (!rimeDir.exists()) rimeDir.mkdirs()
@@ -500,15 +491,23 @@ object RimeConfigHelper {
         return restored
     }
 
+    /** 安装/导入后自动部署（补基线 → 词库补丁 → 增量部署，产物不完整再全量重编）。需在后台线程调用。 */
+    fun deployInstalledSchema(context: Context): Boolean {
+        ensureBuiltinBaseFiles(context)
+        // 刚卸载过冲突方案时 schema_list 可能还指着已删方案，会让维护中断
+        SchemaManager.applyEnabledSchemasToDefaultYaml(context)
+        runBlocking { PersonalDictManager.ensureSchemaPacks(context) }
+        if (ensureDeployment(context) && isDeploymentComplete(context)) return true
+        // 产物不完整：清 hash 后全量重编一次
+        SettingsPreferences.setDeploymentHash(context, "")
+        val deployed = RimeEngine.getInstance().deploy()
+        if (deployed) storeDeploymentHash(context)
+        return deployed
+    }
+
     /**
-     * 已启用方案引用、但缺少编译产物 `build/<dict>.table.bin` 的反查词典。
-     *
-     * librime 部署时只编译每个方案的 `translator/dictionary`（见 deployment_tasks.cc
-     * 的 SchemaUpdate），反查词典（`reverse_lookup/dictionary`）只有在它自己的方案被部署时
-     * 才生成 table.bin。缺产物时运行期会反复报
-     * `attempt to open non-existent file /build/<dict>.table.bin`。
-     *
-     * @return 方案 id → 缺失的反查词典名
+     * 已启用方案引用、但缺 `build/<dict>.table.bin` 的反查词典：librime 只编译方案的
+     * 主词典，反查词典要它自己的方案被部署才生成产物。返回 方案 id → 缺失词典名。
      */
     fun missingReverseLookupTables(context: Context): List<Pair<String, String>> {
         val rimeDir = File(context.filesDir, "rime")
