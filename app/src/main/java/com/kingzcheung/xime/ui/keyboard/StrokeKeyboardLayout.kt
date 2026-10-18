@@ -1,5 +1,6 @@
 package com.kingzcheung.xime.ui.keyboard
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -52,14 +53,18 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kingzcheung.xime.R
+import com.kingzcheung.xime.util.PermissionHelper
 import com.kingzcheung.xime.util.SubcharHelper
 
 /**
@@ -93,6 +98,10 @@ fun StrokeKeyboardLayout(
     isFloatingMode: Boolean = false,
     specialKeyTextColor: Color = Color.White,
     onGestureAction: ((GestureAction, String) -> Unit)? = null,
+    schemaName: String = "",
+    isSttEnabled: Boolean = false,
+    voiceSticky: Boolean = false,
+    onVoiceModeChange: ((Boolean) -> Unit)? = null,
 ) {
     StrokeKeyboardSwipeOverlay(
         modifier = modifier,
@@ -112,6 +121,10 @@ fun StrokeKeyboardLayout(
         keySpacingX = keySpacingX,
         keySpacingY = keySpacingY,
         onGestureAction = onGestureAction,
+        schemaName = schemaName,
+        isSttEnabled = isSttEnabled,
+        voiceSticky = voiceSticky,
+        onVoiceModeChange = onVoiceModeChange,
     )
 }
 
@@ -136,6 +149,10 @@ onKeyPressDown: ((String) -> Unit)?,
     keySpacingX: Dp? = null,
     keySpacingY: Dp? = null,
     onGestureAction: ((GestureAction, String) -> Unit)? = null,
+    schemaName: String = "",
+    isSttEnabled: Boolean = false,
+    voiceSticky: Boolean = false,
+    onVoiceModeChange: ((Boolean) -> Unit)? = null,
 ) {
     val configuration = LocalConfiguration.current
     val isLandscape = !isFloatingMode && configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
@@ -223,6 +240,10 @@ onKeyPressDown: ((String) -> Unit)?,
                         specialKeyTextColor = specialKeyTextColor,
                         compactMode = true,
                         onGestureAction = onGestureAction,
+                        schemaName = schemaName,
+                        isSttEnabled = isSttEnabled,
+                        voiceSticky = voiceSticky,
+                        onVoiceModeChange = onVoiceModeChange,
                     )
                 }
             }
@@ -252,6 +273,10 @@ onKeyPressDown: ((String) -> Unit)?,
                         specialKeyTextColor = specialKeyTextColor,
                         compactMode = false,
                         onGestureAction = onGestureAction,
+                        schemaName = schemaName,
+                        isSttEnabled = isSttEnabled,
+                        voiceSticky = voiceSticky,
+                        onVoiceModeChange = onVoiceModeChange,
                     )
                 }
             }
@@ -301,6 +326,10 @@ private fun StrokeKeyboardContent(
     specialKeyTextColor: Color,
     compactMode: Boolean = false,
     onGestureAction: ((GestureAction, String) -> Unit)? = null,
+    schemaName: String = "",
+    isSttEnabled: Boolean = false,
+    voiceSticky: Boolean = false,
+    onVoiceModeChange: ((Boolean) -> Unit)? = null,
 ) {
     val ctrlFontSize = if (compactMode) 11.sp else androidx.compose.ui.unit.TextUnit.Unspecified
     val strokeFontSize = if (compactMode) 13.sp else 16.sp
@@ -579,6 +608,10 @@ private fun StrokeKeyboardContent(
                     onSwipeUp = swipeHandlerFor(spaceSwipe, onKeyPress, onGestureAction),
                     swipeUpBadge = if (hintsActive && spaceSwipe?.display != DisplayMode.BUBBLE)
                         spaceSwipe?.label?.ifEmpty { spaceSwipe?.value } else null,
+                    schemaName = schemaName,
+                    isSttEnabled = isSttEnabled,
+                    voiceSticky = voiceSticky,
+                    onVoiceModeChange = onVoiceModeChange,
                 )
                 StrokeSymbolButton(
                     text = ".",
@@ -895,8 +928,16 @@ private fun StrokeSpaceButton(
     onSwipeUp: (() -> Unit)? = null,
     /** 上滑键面角标（display: key 时显示，通常为滑动目标字符如 "0"）。 */
     swipeUpBadge: String? = null,
+    schemaName: String = "",
+    isSttEnabled: Boolean = false,
+    voiceSticky: Boolean = false,
+    onVoiceModeChange: ((Boolean) -> Unit)? = null,
 ) {
+    val context = LocalContext.current
+    val view = LocalView.current
     val density = LocalDensity.current
+    val currentOnKeyPress by rememberUpdatedState(onKeyPress)
+    val currentOnVoiceModeChange by rememberUpdatedState(onVoiceModeChange)
     val currentOnSwipeUp by rememberUpdatedState(onSwipeUp)
     val shadowModifier = remember(shadowEnabled, shadowElevation, shadowShapeRadius, density, backgroundColor) {
         if (shadowEnabled) {
@@ -918,20 +959,42 @@ private fun StrokeSpaceButton(
         modifier = modifier
             .fillMaxHeight()
             .padding(horizontal = 2.dp, vertical = 2.dp)
-            .pointerInput(Unit) {
+            .pointerInput(voiceSticky, isSttEnabled) {
+                // 与九键空格一致：常驻语音轻触结束（不发空格），长按进入按住说话
                 detectTapGestures(
                     onPress = {
-                        onKeyPressDown?.invoke("space")
-                        tryAwaitRelease()
+                        if (voiceSticky) {
+                            tryAwaitRelease()
+                        } else {
+                            onKeyPressDown?.invoke("space")
+                            tryAwaitRelease()
+                        }
                     },
-                    onTap = { onKeyPress("space") },
+                    onTap = {
+                        if (voiceSticky) {
+                            currentOnVoiceModeChange?.invoke(false)
+                        } else {
+                            currentOnKeyPress("space")
+                        }
+                    },
+                    onLongPress = {
+                        if (voiceSticky) return@detectTapGestures
+                        if (!isSttEnabled) return@detectTapGestures
+                        view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                        if (!PermissionHelper.hasRecordAudioPermission(context)) {
+                            Toast.makeText(context, "需要麦克风权限才能使用语音输入", Toast.LENGTH_SHORT).show()
+                            PermissionHelper.requestRecordAudioPermission(context)
+                        } else {
+                            currentOnVoiceModeChange?.invoke(true)
+                        }
+                    }
                 )
             }
-            .pointerInput(onSwipeUp) {
+            .pointerInput(voiceSticky, onSwipeUp) {
                 // 空格上滑（如直接输入数字 0）：纵向拖动超阈值触发一次。
-                // 与 detectTapGestures 共存：拖动时 tap 自动取消，点击不受影响；
-                // 仅在已触发后消费事件，不干扰横向光标手势。
-                if (onSwipeUp == null) return@pointerInput
+                // 与 detectTapGestures 共存：拖动时 tap 自动取消，点击/长按语音不受影响；
+                // 常驻语音态不响应上滑。仅在已触发后消费事件，不干扰横向光标手势。
+                if (onSwipeUp == null || voiceSticky) return@pointerInput
                 var totalY = 0f
                 var triggered = false
                 val thresholdPx = 50.dp.toPx()
@@ -956,15 +1019,53 @@ private fun StrokeSpaceButton(
                 .clip(RoundedCornerShape(LocalKeyCornerRadius.current))
                 .background(backgroundColor)
         )
-        Text(
-            text = "空格",
-            color = textColor.copy(alpha = 0.3f),
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Normal,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            fontFamily = AppFonts.keyFontFamily
-        )
+        if (voiceSticky) {
+            Text(
+                text = "轻触结束语音",
+                color = textColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                fontFamily = AppFonts.keyFontFamily
+            )
+        } else {
+            Text(
+                text = schemaName,
+                color = textColor,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Normal,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 8.dp),
+                fontFamily = AppFonts.keyFontFamily
+            )
+            if (isSttEnabled) {
+                Icon(
+                    painter = painterResource(R.drawable.voice),
+                    contentDescription = "语音输入",
+                    tint = textColor.copy(alpha = 0.3f),
+                    modifier = Modifier
+                        .size(18.dp)
+                        .align(Alignment.BottomStart)
+                        .padding(start = 6.dp, bottom = 2.dp)
+                )
+            } else {
+                Text(
+                    text = "空格",
+                    color = textColor.copy(alpha = 0.3f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Normal,
+                    textAlign = TextAlign.Start,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 6.dp, bottom = 2.dp),
+                    fontFamily = AppFonts.keyFontFamily
+                )
+            }
+        }
         // 上滑手势键面角标（如 "0"）：与数字键上滑数字提示（swipeUpKeyLabel）同位同样式
         if (swipeUpBadge != null) {
             Text(
