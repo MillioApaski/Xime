@@ -84,6 +84,53 @@ data class KeyboardLayoutConfig(
 )
 
 /**
+ * 行内键宽的取齐策略（`layout.row_align`，行级 `align` 可覆盖）。
+ */
+enum class RowAlign(val value: String) {
+    /** 键宽按列对齐：行宽 = 键数 / 列数，行居中（缺省）。 */
+    UNIFORM("uniform"),
+
+    /** 行内均分铺满整行（键宽 = 行宽 / 本行键数）。 */
+    STRETCH("stretch");
+
+    companion object {
+        fun fromValue(value: String): RowAlign? =
+            entries.firstOrNull { it.value.equals(value.trim(), ignoreCase = true) }
+    }
+}
+
+/**
+ * 一行键盘布局声明。数组/标量行等价于只给 [keys]（其余字段留空 = 用键盘级策略）。
+ */
+data class KeyboardRow(
+    val keys: List<String>,
+    /** 行级对齐覆盖；null = 用 [KeyboardRowsLayout.rowAlign]。 */
+    val align: RowAlign? = null,
+    /** 行占键盘内容宽度的比例（0..1）；null = 按 [align] 推导。 */
+    val width: Float? = null,
+)
+
+/**
+ * 一个键盘 section 的行布局：行声明 + 参考列数 + 键盘级对齐策略。
+ * 由 `keyboard.<section>.layout` 的 rows / columns / row_align 解析而来。
+ */
+data class KeyboardRowsLayout(
+    val rows: List<KeyboardRow>,
+    /** 参考列数（`layout.columns`）；null = 取首行键数。 */
+    val columns: Int? = null,
+    /** 键盘级默认对齐（`layout.row_align`），行级 [KeyboardRow.align] 覆盖。 */
+    val rowAlign: RowAlign = RowAlign.UNIFORM,
+)
+
+/**
+ * 键盘行布局解析结果：中英文（或合并键 section）的行布局。
+ */
+internal data class QwertyRowsConfig(
+    val zhLayout: KeyboardRowsLayout,
+    val enLayout: KeyboardRowsLayout,
+)
+
+/**
  * 键盘阴影配置，从 xime.yaml keyboard.shadow 加载。
  */
 data class KeyboardShadowConfig(
@@ -785,15 +832,15 @@ object KeysConfigHelper {
     )
 
     // 键盘行布局缓存（中文 / 英文）
-    private var _zhRows: List<List<String>> = DEFAULT_ZH_ROWS
-    private var _enRows: List<List<String>> = DEFAULT_EN_ROWS
+    private var _zhLayout: KeyboardRowsLayout = KeyboardRowsLayout(DEFAULT_ZH_ROWS.map { KeyboardRow(it) })
+    private var _enLayout: KeyboardRowsLayout = KeyboardRowsLayout(DEFAULT_EN_ROWS.map { KeyboardRow(it) })
 
     // 标准 26 键的基线缓存（合并键布局切换退出时恢复）
-    private var _zhRowsBase: List<List<String>> = DEFAULT_ZH_ROWS
+    private var _zhLayoutBase: KeyboardRowsLayout = KeyboardRowsLayout(DEFAULT_ZH_ROWS.map { KeyboardRow(it) })
     private var _keyGestureConfigZhBase: Map<String, KeyBinding> = emptyMap()
 
     // 合并键布局缓存：section（qwerty_14/17/18 及 custom 新增）→ 行布局 / 手势配置
-    private var _mergedRows: Map<String, List<List<String>>> = emptyMap()
+    private var _mergedLayouts: Map<String, KeyboardRowsLayout> = emptyMap()
     private var _mergedGestureConfigs: Map<String, Map<String, KeyBinding>> = emptyMap()
     private var _activeMergedSection: String? = null
     private var _activeSchemaId: String = ""
@@ -902,10 +949,11 @@ object KeysConfigHelper {
         if (merged == _activeMergedSection && t9 == _activeT9Section && stroke == _activeStrokeSection) return
         _activeMergedSection = merged
         if (merged != null) {
-            _zhRows = _mergedRows[merged] ?: DEFAULT_ZH_ROWS
+            _zhLayout = _mergedLayouts[merged]
+                ?: KeyboardRowsLayout(DEFAULT_ZH_ROWS.map { KeyboardRow(it) })
             _keyGestureConfig.value = _mergedGestureConfigs[merged] ?: emptyMap()
         } else {
-            _zhRows = _zhRowsBase
+            _zhLayout = _zhLayoutBase
             _keyGestureConfig.value = _keyGestureConfigZhBase
         }
         // 代码布局按段切换：type 声明的任意段名可并存多份九键/笔画配置，激活哪个段就换入哪份
@@ -921,10 +969,13 @@ object KeysConfigHelper {
         }
     }
 
-    /** 获取键盘行布局，每个子 List 为一行的按键 ID 列表，索引 0=第一行。
-     *  合并键布局中合并键的 ID 为组内字母拼接（如 "qw"），渲染层按 ID 长度分配键宽。 */
-    fun getKeyRows(isAsciiMode: Boolean): List<List<String>> =
-        if (isAsciiMode) _enRows else _zhRows
+    /**
+     * 获取键盘行布局：行声明（含行级 align/width）+ 参考列数 + 键盘级对齐策略。
+     * 每个 [KeyboardRow] 的 keys 为一行的按键 ID 列表，索引 0 = 第一行；
+     * 合并键布局中合并键的 ID 为组内字母拼接（如 "qw"），渲染层按 ID 长度分配键宽。
+     */
+    fun getRowsLayout(isAsciiMode: Boolean): KeyboardRowsLayout =
+        if (isAsciiMode) _enLayout else _zhLayout
     
     /** 配置版本号，每次 loadConfig 时递增，用于 Compose 感知配置变更。 */
     private val _configVersion = MutableStateFlow(0)
@@ -1015,8 +1066,8 @@ object KeysConfigHelper {
             _buttonLayoutEn = parsedLayouts.second
             // 键盘行布局
             val parsedRows = parseKeyboardLayoutFromAssets(context)
-            _zhRowsBase = parsedRows.first
-            _enRows = parsedRows.second
+            _zhLayoutBase = parsedRows.zhLayout
+            _enLayout = parsedRows.enLayout
             // 合并键绑定（keyboard.<section>.schemas，custom 覆盖 builtIn 同名方案的绑定）
             // 内置/自定义两份 YAML 文本只读一次，后面几处复用（面板段装载也用同一份）
             val builtInText = readAssetText(context, XIME_CONFIG_FILE)
@@ -1031,16 +1082,16 @@ object KeysConfigHelper {
             // 合并键布局 sections：由 schemas 绑定动态发现（内置 qwerty_14/17/18 + custom 新增）；
             // 代码布局 section（type 声明或段名为 t9/stroke/handwriting）无行数据，走按段装载（下方）
             // （button_layout 同理：仅全键盘段支持，九键/笔画段不解析）
-            val mergedRowsMap = mutableMapOf<String, List<List<String>>>()
+            val mergedLayoutsMap = mutableMapOf<String, KeyboardRowsLayout>()
             val mergedGesturesMap = mutableMapOf<String, Map<String, KeyBinding>>()
             val buttonLayoutsBySection = mutableMapOf<String, ButtonLayout>()
             for (section in _schemaSectionBindings.values
                 .filter { sectionKindOf(it, _sectionTypes) == SECTION_TYPE_FULL }.distinct()) {
-                parseLayoutSection(context, section)?.let { mergedRowsMap[section] = it }
+                parseRowsLayoutSection(context, section)?.let { mergedLayoutsMap[section] = it }
                 mergedGesturesMap[section] = parseGesturesSection(context, section)
                 parseButtonLayoutSection(context, section)?.let { buttonLayoutsBySection[section] = it }
             }
-            _mergedRows = mergedRowsMap
+            _mergedLayouts = mergedLayoutsMap
             _mergedGestureConfigs = mergedGesturesMap
             _buttonLayoutBySection = buttonLayoutsBySection
             // 代码布局按段装载：绑定的代码布局段 + 内置保留名（未绑定时配置仍可用），
@@ -1091,7 +1142,7 @@ object KeysConfigHelper {
             // setActiveKeyboardSchema 覆盖。不能只依赖 setActiveKeyboardSchema：
             // 非合并键方案 section 为 null，与刚重置的 _activeMergedSection(null) 相等
             // 会被提前 return，导致 xime.custom.yaml 的行布局/手势不生效（重新部署也无效）。
-            _zhRows = _zhRowsBase
+            _zhLayout = _zhLayoutBase
             _keyGestureConfig.value = _keyGestureConfigZhBase
             // 重新应用当前方案对应的合并键布局（上面重置了基线缓存）
             _activeMergedSection = null
@@ -1486,7 +1537,7 @@ object KeysConfigHelper {
             ?.items?.mapNotNull { (it as? YamlScalar)?.content }?.filter { it.isNotBlank() }
         val right = layoutNode.opt<YamlList>("right")
             ?.items?.mapNotNull { (it as? YamlScalar)?.content }?.filter { it.isNotBlank() }
-        val rows = layoutNode.opt<YamlList>("rows")?.let { parseLayoutRowsNode(it) }
+        val rows = layoutNode.opt<YamlList>("rows")?.let { parseRowsNode(it).map { row -> row.keys } }
         if (left.isNullOrEmpty() && right.isNullOrEmpty() && rows.isNullOrEmpty()) return null
         return KeyboardT9LayoutPartial(
             left = left?.takeIf { it.isNotEmpty() },
@@ -1601,9 +1652,10 @@ object KeysConfigHelper {
         return result
     }
 
-    /** 从 xime.yaml + xime.custom.yaml 合并解析键盘行布局。 */
-    private fun parseKeyboardLayoutFromAssets(context: Context): Pair<List<List<String>>, List<List<String>>> {
-        val defaultText = readAssetText(context, XIME_CONFIG_FILE) ?: return Pair(DEFAULT_ZH_ROWS, DEFAULT_EN_ROWS)
+    /** 从 xime.yaml + xime.custom.yaml 合并解析中英文键盘行布局（rows + columns + row_align）。 */
+    private fun parseKeyboardLayoutFromAssets(context: Context): QwertyRowsConfig {
+        val defaultText = readAssetText(context, XIME_CONFIG_FILE)
+            ?: return QwertyRowsConfig(defaultRowsLayout(DEFAULT_ZH_ROWS), defaultRowsLayout(DEFAULT_EN_ROWS))
 
         val customText = readUserDataText(context, XIME_CUSTOM_CONFIG_FILE)
             ?: readAssetText(context, XIME_CUSTOM_CONFIG_FILE)
@@ -1612,26 +1664,49 @@ object KeysConfigHelper {
         val zhSection = resolveQwertySection("qwerty", defaultText, customText, isTablet)
         val enSection = resolveQwertySection("qwerty_en", defaultText, customText, isTablet)
 
-        val defaultZh = parseKeyboardLayoutYamlText(defaultText, zhSection)
-        val defaultEn = parseKeyboardLayoutYamlText(defaultText, enSection)
-
-        val customZh = customText?.let { parseKeyboardLayoutYamlText(it, zhSection) }
-        val customEn = customText?.let { parseKeyboardLayoutYamlText(it, enSection) }
-
-        return Pair(
-            customZh ?: defaultZh ?: DEFAULT_ZH_ROWS,
-            customEn ?: defaultEn ?: DEFAULT_EN_ROWS,
+        return QwertyRowsConfig(
+            zhLayout = mergeRowsLayout(defaultText, customText, zhSection),
+            enLayout = mergeRowsLayout(defaultText, customText, enSection),
         )
     }
 
-    /** 从 xime.yaml + xime.custom.yaml 合并解析指定 section 的键盘行布局（custom 整段覆盖 built-in）。 */
-    private fun parseLayoutSection(context: Context, section: String): List<List<String>>? {
+    /**
+     * 合并解析一个 section 的行布局：rows（custom 段级覆盖 built-in）、columns、row_align。
+     * 三者各自独立回退，未配置时取缺省值（项目内置默认行 / 首行键数 / uniform）。
+     */
+    internal fun mergeRowsLayout(
+        defaultText: String,
+        customText: String?,
+        section: String,
+        defaultRows: List<List<String>> = emptyList(),
+    ): KeyboardRowsLayout {
+        val customLayout = customText?.let { parseKeyboardRowsYamlText(it, section) }
+        val customColumns = customText?.let { parseKeyboardColumnsYamlText(it, section) }
+        val customAlign = customText?.let { parseKeyboardRowAlignYamlText(it, section) }
+        val builtInLayout = parseKeyboardRowsYamlText(defaultText, section)
+        val builtInColumns = parseKeyboardColumnsYamlText(defaultText, section)
+        val builtInAlign = parseKeyboardRowAlignYamlText(defaultText, section)
+        val rows = customLayout ?: builtInLayout ?: defaultRows.map { KeyboardRow(it) }
+        return KeyboardRowsLayout(
+            rows = rows,
+            columns = customColumns ?: builtInColumns,
+            rowAlign = customAlign ?: builtInAlign ?: RowAlign.UNIFORM,
+        )
+    }
+
+    /** 代码缺省行 → 行布局（列数按首行键数推导，对齐 uniform）。 */
+    private fun defaultRowsLayout(rows: List<List<String>>): KeyboardRowsLayout =
+        KeyboardRowsLayout(rows.map { KeyboardRow(it) })
+
+    /** 从 xime.yaml + xime.custom.yaml 合并解析指定 section 的行布局（custom 段级覆盖 built-in）。 */
+    private fun parseRowsLayoutSection(context: Context, section: String): KeyboardRowsLayout? {
         val defaultText = readAssetText(context, XIME_CONFIG_FILE)
-        val default = defaultText?.let { parseKeyboardLayoutYamlText(it, section) }
         val customText = readUserDataText(context, XIME_CUSTOM_CONFIG_FILE)
             ?: readAssetText(context, XIME_CUSTOM_CONFIG_FILE)
-        val custom = customText?.let { parseKeyboardLayoutYamlText(it, section) }
-        return custom ?: default
+        val customLayout = customText?.let { parseKeyboardRowsYamlText(it, section) }
+        val builtInLayout = defaultText?.let { parseKeyboardRowsYamlText(it, section) }
+        if (customLayout == null && builtInLayout == null) return null
+        return mergeRowsLayout(defaultText.orEmpty(), customText, section)
     }
 
     /** 解析指定合并键段（custom 覆盖 built-in）的按键布局模式；未配置返回 null（回退 qwerty 全局值）。 */
@@ -1720,12 +1795,12 @@ object KeysConfigHelper {
             if (leftNode != null || rightNode != null) {
                 PanelLayoutConfig(
                     columns = true,
-                    rows = rowsNode?.let { parseLayoutRowsNode(it) } ?: emptyList(),
+                    rows = rowsNode?.let { parseRowsNode(it).map { row -> row.keys } } ?: emptyList(),
                     left = leftNode?.let { parsePanelColumnItems(it) } ?: emptyList(),
                     right = rightNode?.let { parsePanelColumnItems(it) } ?: emptyList(),
                 )
             } else {
-                PanelLayoutConfig(columns = false, rows = rowsNode?.let { parseLayoutRowsNode(it) } ?: emptyList())
+                PanelLayoutConfig(columns = false, rows = rowsNode?.let { parseRowsNode(it).map { row -> row.keys } } ?: emptyList())
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to parse panel layout config", e)
@@ -1783,38 +1858,96 @@ object KeysConfigHelper {
     }
 
     /**
-     * 从 YAML 文本中提取 keyboard.<section>.layout.rows。
+     * 从 YAML 文本中提取 keyboard.<section>.layout.rows（只取按键 ID，忽略行级 align/width）。
      * 行元素支持嵌套子数组表示合并键：[[q, w], [e, r], t] → ["qw", "er", "t"]，
      * 合并键 ID 为组内字母拼接，渲染层按 ID 长度分配键宽。
      */
-    internal fun parseKeyboardLayoutYamlText(yamlText: String, section: String): List<List<String>>? {
+    internal fun parseKeyboardLayoutYamlText(yamlText: String, section: String): List<List<String>>? =
+        parseKeyboardRowsYamlText(yamlText, section)?.map { it.keys }
+
+    /**
+     * 从 YAML 文本中提取 keyboard.<section>.layout.rows（带行级 align/width）。
+     * 行支持数组/标量简写，或对象形式 `{ keys: [...], align: uniform|stretch, width: 0..1 }`。
+     */
+    internal fun parseKeyboardRowsYamlText(yamlText: String, section: String): List<KeyboardRow>? {
         return try {
-            val root = yaml.parseToYamlNode(yamlText) as? YamlMap ?: return null
-            val keyboardNode = root.opt<YamlMap>("keyboard") ?: return null
-            val sectionNode = keyboardNode.opt<YamlMap>(section) ?: return null
-            val layoutNode = sectionNode.opt<YamlMap>("layout") ?: return null
+            val layoutNode = layoutNodeOf(yamlText, section) ?: return null
             val rowsNode = layoutNode.opt<YamlList>("rows") ?: return null
-            parseLayoutRowsNode(rowsNode).takeIf { it.isNotEmpty() }
+            parseRowsNode(rowsNode).takeIf { it.isNotEmpty() }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to parse keyboard layout config", e)
             null
         }
     }
 
-    /** rows 节点 → 行列表：子数组为合并键（组内字母拼接为 ID），标量行手动拆分兜底。 */
-    private fun parseLayoutRowsNode(rowsNode: YamlList): List<List<String>> {
-        val rows = mutableListOf<List<String>>()
+    /** 从 YAML 文本中提取 keyboard.<section>.layout.columns（参考列数）；缺省返回 null（取首行键数）。 */
+    internal fun parseKeyboardColumnsYamlText(yamlText: String, section: String): Int? {
+        return try {
+            layoutNodeOf(yamlText, section)
+                ?.opt<YamlScalar>("columns")?.content?.trim()?.toIntOrNull()?.takeIf { it > 0 }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse keyboard columns config", e)
+            null
+        }
+    }
+
+    /** 从 YAML 文本中提取 keyboard.<section>.layout.row_align；缺省/非法返回 null（按 uniform 处理）。 */
+    internal fun parseKeyboardRowAlignYamlText(yamlText: String, section: String): RowAlign? {
+        return try {
+            layoutNodeOf(yamlText, section)
+                ?.opt<YamlScalar>("row_align")?.content?.let { RowAlign.fromValue(it) }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse keyboard row_align config", e)
+            null
+        }
+    }
+
+    /** 定位 keyboard.<section>.layout 节点；任一层缺失返回 null。 */
+    private fun layoutNodeOf(yamlText: String, section: String): YamlMap? {
+        val root = yaml.parseToYamlNode(yamlText) as? YamlMap ?: return null
+        val keyboardNode = root.opt<YamlMap>("keyboard") ?: return null
+        val sectionNode = keyboardNode.opt<YamlMap>(section) ?: return null
+        return sectionNode.opt<YamlMap>("layout")
+    }
+
+    /** rows 节点 → 行声明列表：数组/标量为简写行，映射为带 align/width 的完整行。 */
+    private fun parseRowsNode(rowsNode: YamlList): List<KeyboardRow> {
+        val rows = mutableListOf<KeyboardRow>()
         for (rowNode in rowsNode.items) {
             val row = when (rowNode) {
-                is YamlList -> rowListToKeyIds(rowNode)
-                is YamlScalar -> scalarRowToKeyIds(rowNode.content)
-                else -> emptyList()
+                is YamlList -> KeyboardRow(rowListToKeyIds(rowNode))
+                is YamlScalar -> KeyboardRow(scalarRowToKeyIds(rowNode.content))
+                is YamlMap -> parseRowMap(rowNode)
+                else -> null
             }
-            if (row.isNotEmpty()) {
-                rows.add(row)
-            }
+            if (row != null && row.keys.isNotEmpty()) rows.add(row)
         }
         return rows
+    }
+
+    /** 对象行 → 行声明：keys（数组或标量行）+ 可选 align / width（非法值静默忽略）。 */
+    private fun parseRowMap(rowNode: YamlMap): KeyboardRow {
+        val keysNode = childNode(rowNode, "keys")
+        val keys = when (keysNode) {
+            is YamlList -> rowListToKeyIds(keysNode)
+            is YamlScalar -> scalarRowToKeyIds(keysNode.content)
+            else -> emptyList()
+        }
+        val align = childNode(rowNode, "align")
+            ?.let { (it as? YamlScalar)?.content }
+            ?.let { RowAlign.fromValue(it) }
+        val width = childNode(rowNode, "width")
+            ?.let { (it as? YamlScalar)?.content?.trim()?.toFloatOrNull() }
+            ?.coerceIn(0f, 1f)
+        return KeyboardRow(keys, align, width)
+    }
+
+    /** 取映射节点下指定名字的子节点。 */
+    private fun childNode(map: YamlMap, name: String): YamlNode? {
+        for ((key, value) in map.entries) {
+            if (key.content == name) return value
+        }
+        return null
     }
 
     /** 行节点 → 按键 ID 列表：子数组为合并键（组内字母拼接为 ID），标量为单字母键。 */

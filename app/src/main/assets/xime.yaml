@@ -478,6 +478,14 @@ keyboard:
     # compact: 紧凑布局（主文字在左上，下滑提示占满键帽中部）
     button_layout: standard
     layout:
+      # ── 行宽与对齐（均可选，写在 layout 下作用于整段键盘）──
+      # columns:   参考列数，缺省取首行键数；uniform 下决定行宽与键宽
+      # row_align: uniform（默认）= 键宽按列对齐、行居中；stretch = 行内均分铺满
+      # 行可写成数组（继承键盘级策略），或对象形式做行级覆盖：
+      #   - { keys: [a, s, d, f, g, h, j, k, l], align: stretch }   # 该行满宽均分
+      #   - { keys: [z, x, c, v, b, n, m], width: 0.7 }             # 该行占 70% 宽（居中）
+      # columns: 10
+      # row_align: uniform
       rows:
         - [q, w, e, r, t, y, u, i, o, p]
         - [a, s, d, f, g, h, j, k, l]
@@ -544,6 +552,14 @@ keyboard:
     # compact: 紧凑布局（主文字在左上，下滑提示占满键帽中部）
     button_layout: standard
     layout:
+      # ── 行宽与对齐（均可选，写在 layout 下作用于整段键盘）──
+      # columns:   参考列数，缺省取首行键数；uniform 下决定行宽与键宽
+      # row_align: uniform（默认）= 键宽按列对齐、行居中；stretch = 行内均分铺满
+      # 行可写成数组（继承键盘级策略），或对象形式做行级覆盖：
+      #   - { keys: [a, s, d, f, g, h, j, k, l], align: stretch }   # 该行满宽均分
+      #   - { keys: [z, x, c, v, b, n, m], width: 0.7 }             # 该行占 70% 宽（居中）
+      # columns: 10
+      # row_align: uniform
       rows:
         - [q, w, e, r, t, y, u, i, o, p]
         - [a, s, d, f, g, h, j, k, l]
@@ -732,6 +748,8 @@ keyboard:
     schemas: [pinyin_14jian]
     button_layout: standard
     layout:
+      # 合并键布局按各行键数铺满（行短于首行也不居中），保持既有观感
+      row_align: stretch
       rows:
         - [[q, w], [e, r], [t, y], [u, i], [o, p]]
         - [[a, s], [d, f], [g, h], [j, k], [l]]
@@ -760,6 +778,8 @@ keyboard:
     schemas: [pinyin_17jian]
     button_layout: standard
     layout:
+      # 合并键布局按各行键数铺满（行短于首行也不居中），保持既有观感
+      row_align: stretch
       rows:
         - [q, [w, e], [r, t], [y, u], i, [o, p]]
         - [a, [s, d], [f, g], h, [j, k], l]
@@ -791,6 +811,8 @@ keyboard:
     schemas: [pinyin_18jian]
     button_layout: standard
     layout:
+      # 合并键布局按各行键数铺满（行短于首行也不居中），保持既有观感
+      row_align: stretch
       rows:
         - [q, [w, e], [r, t], y, u, [i, o], p]
         - [a, [s, d], [f, g], h, [j, k], l]
