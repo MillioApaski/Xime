@@ -2157,10 +2157,12 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                             schemaController.applyPageSizeSetting(savedSchema)
                             rimeEngine.switchSchema(savedSchema)
                         } else {
-                            // 即使 schema 相同也重新 switch 一下，确保 processor 完全初始化
-                            debugLog("onStartInput: Schema already matches, re-switching to init processors")
-                            schemaController.applyPageSizeSetting(savedSchema)
-                            rimeEngine.switchSchema(savedSchema)
+                            // 方案未变：select_schema 会重建全部 processor/translator（连用户词典一起重开），
+                            // 而 current==saved 已证明当前会话的引擎应用了该方案（会话重建后 current 是
+                            // ".default"）。这里跳过重建，只兜底清一次上轮可能残留的组合态
+                            //（原实现靠 ApplySchema 的 context.Clear 顺带完成）。
+                            debugLog("onStartInput: Schema already active, skip redundant switch")
+                            rimeEngine.clearComposition()
                         }
                         actualSchema = savedSchema
                     }
