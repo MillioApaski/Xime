@@ -614,7 +614,9 @@ fun SwipeableKeyButton(
                         currentOnSwipeStateChange?.invoke(SwipeState(false, null, false, emptyList(), false, null), buttonBounds)
                     },
                     onDragCancel = {
-                        // 拖拽被取消：抬手时由点击分支兜底点击，这里不点（避免重复）
+                        // 拖拽被取消也要兜底点击，否则"轻微位移触发拖拽 → 被父层/系统取消"会静默丢键；
+                        // 已触发滑动或横向光标手势时由 emitClick 否决
+                        emitClick(lastPressOffset.x, lastPressOffset.y)
                         isPressed = false
                         currentOnRelease?.invoke()
                         dragOffsetX = 0f
@@ -714,8 +716,10 @@ fun SwipeableKeyButton(
                                 currentOnRelease?.invoke()
                                 currentOnSwipeStateChange?.invoke(SwipeState(false, null, false, emptyList(), false, null), buttonBounds)
                             }
-                            // 手势被取消也按点击兜底（滑动由 emitClick 否决）
-                            if (!released) emitClick(lastPressOffset.x, lastPressOffset.y)
+                            // 取消时不能在松手时立刻补点击：容差点击一旦净位移超过 touch slop 就会取消，
+                            // 此时滑动阈值（50dp）还没到，hasTriggeredSwipe* 仍为 false；提前上屏 tap 值后
+                            // 还会再执行上滑/下滑动作，表现为「下滑数字键上屏 1!」（issue #1133）。
+                            // 点击判定交给拖拽的 onDragEnd/onDragCancel：滑动触发则否决，未触发才补点击。
                         },
                         onTap = { emitClick(lastPressOffset.x, lastPressOffset.y) }
                     )
