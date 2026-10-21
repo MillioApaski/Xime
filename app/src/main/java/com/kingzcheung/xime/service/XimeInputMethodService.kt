@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.sp
 import com.kingzcheung.xime.ui.keyboard.FloatingCardGeometry
 import com.kingzcheung.xime.ui.keyboard.FloatingExitGlow
 import com.kingzcheung.xime.ui.keyboard.KeyboardResizeOverlay
+import com.kingzcheung.xime.ui.keyboard.KeyboardResizeBounds
 import com.kingzcheung.xime.ui.keyboard.HardwareKeyboardCandidateBar
 import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
@@ -517,14 +518,19 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             SettingsPreferences.setFloatingOffsetX(this, clampedX, isLandscape)
             SettingsPreferences.setFloatingOffsetY(this, clampedY, isLandscape)
         }
+        // 边距按当前屏宽收紧：横竖屏/折叠屏切换后旧值可能超出上限（键盘会收到负宽）
+        val maxMargin = KeyboardResizeBounds.maxHorizontalMarginDp(screenW)
         uiState.value = uiState.value.copy(
             darkMode = SettingsPreferences.getDarkMode(this),
             themeId = SettingsPreferences.getKeyboardTheme(this),
             isSttEnabled = SettingsPreferences.isSttEnabled(this@XimeInputMethodService),
             keyboardHeightDp = SettingsPreferences.getKeyboardHeightDp(this, isLandscape),
             keyboardBottomPaddingDp = SettingsPreferences.getKeyboardBottomPaddingDp(this),
-            keyboardMarginStartDp = SettingsPreferences.getKeyboardMarginStartDp(this),
-            keyboardMarginEndDp = SettingsPreferences.getKeyboardMarginEndDp(this),
+            keyboardMarginStartDp = SettingsPreferences.getKeyboardMarginStartDp(this).coerceIn(0, maxMargin),
+            keyboardMarginEndDp = SettingsPreferences.getKeyboardMarginEndDp(this).coerceIn(0, maxMargin),
+            // 调节进行中的预览值同样收紧（旋转/折叠切换后可能超出新屏宽上限）
+            resizePreviewMarginStartDp = uiState.value.resizePreviewMarginStartDp.coerceIn(0, maxMargin),
+            resizePreviewMarginEndDp = uiState.value.resizePreviewMarginEndDp.coerceIn(0, maxMargin),
             toolbarButtons = SettingsPreferences.getToolbarButtons(this),
             isFloatingMode = isFloatingMode,
             floatingOffsetX = clampedX,
