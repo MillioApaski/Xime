@@ -526,6 +526,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             isSttEnabled = SettingsPreferences.isSttEnabled(this@XimeInputMethodService),
             keyboardHeightDp = SettingsPreferences.getKeyboardHeightDp(this, isLandscape),
             keyboardBottomPaddingDp = SettingsPreferences.getKeyboardBottomPaddingDp(this),
+            keyboardFlushBottom = SettingsPreferences.isKeyboardFlushBottom(this),
             keyboardMarginStartDp = SettingsPreferences.getKeyboardMarginStartDp(this).coerceIn(0, maxMargin),
             keyboardMarginEndDp = SettingsPreferences.getKeyboardMarginEndDp(this).coerceIn(0, maxMargin),
             // 调节进行中的预览值同样收紧（旋转/折叠切换后可能超出新屏宽上限）
@@ -542,7 +543,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         val prefs = SettingsPreferences.getPrefsPublic(this)
         sharedPrefsListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             when (key) {
-                "dark_mode", "keyboard_theme", "show_bottom_buttons", "keyboard_height_dp", "keyboard_bottom_padding_dp" -> {
+                "dark_mode", "keyboard_theme", "show_bottom_buttons", "keyboard_height_dp", "keyboard_bottom_padding_dp", "keyboard_flush_bottom" -> {
                     loadDarkModePreference()
                     applyWindowBackground()
                 }
@@ -1512,7 +1513,10 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 // 兜底仅用于彻底检测不到任何底部 inset 的场景（全屏沉浸），
                 // 不再把已有差异（标准 44dp / 手势 16dp）强行垫平。
                 val minBottomDp = 18
-                val activeBottomDp = if (bottomSpaceDp == 0) minBottomDp else bottomSpaceDp
+                // 贴底开关：导航栏/手势条隐藏时，系统 inset 仍可能回退出安全留白，
+                // 导致键面离屏幕底边偏高。开启后按 0 处理，键面落到屏幕底边。
+                val activeBottomDp = if (state.keyboardFlushBottom) 0
+                    else if (bottomSpaceDp == 0) minBottomDp else bottomSpaceDp
                 val navBarDp = activeBottomDp.dp
                 val hasNavBar = navBarDp > 0.dp
                 // 左右边衬区：手机上键盘内容（候选栏 logo/收起按钮与按键区）避让挖孔/横屏导航栏；
@@ -1882,7 +1886,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                     (bottomInsetPxState.value / density).toInt() else 0
                 val extraShrink = if (rawDp >= 120) 8 else 0
                 val bottomSpace = if (rawDp > 0) (rawDp - 8 - extraShrink).coerceAtLeast(0) else 0
-                val activeBottomDp = if (bottomSpace == 0) 18 else bottomSpace
+                val activeBottomDp = if (SettingsPreferences.isKeyboardFlushBottom(this)) 0
+                    else if (bottomSpace == 0) 18 else bottomSpace
                 view.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
                     height = ((displayHeight + state.keyboardBottomPaddingDp + activeBottomDp) * density).toInt()
                 }

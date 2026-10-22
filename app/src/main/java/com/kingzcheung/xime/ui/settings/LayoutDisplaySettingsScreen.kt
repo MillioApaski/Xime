@@ -122,6 +122,42 @@ fun LayoutDisplaySettingsContent(
                             }
                         )
                     }
+
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 16.dp),
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
+
+                    var keyboardFlushBottom by remember {
+                        mutableStateOf(SettingsPreferences.isKeyboardFlushBottom(context))
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "键盘贴底显示",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "隐藏底部导航栏或手势条后，键盘底部仍会保留安全留白；开启后键盘内容下移到屏幕底边。导航栏按钮可见时请关闭，避免按键被遮挡",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = keyboardFlushBottom,
+                            onCheckedChange = { enabled ->
+                                keyboardFlushBottom = enabled
+                                SettingsPreferences.setKeyboardFlushBottom(context, enabled)
+                            }
+                        )
+                    }
                 })
             }
 
