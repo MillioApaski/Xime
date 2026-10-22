@@ -687,6 +687,17 @@ object SettingsPreferences {
         getPrefs(context).edit().putInt(KEY_KEYBOARD_BOTTOM_PADDING_DP, paddingDp).apply()
     }
 
+    /** 键盘贴底显示：忽略底部系统 inset，把键盘内容下移到屏幕底边（隐藏导航栏/手势条时使用）。 */
+    private const val KEY_KEYBOARD_FLUSH_BOTTOM = "keyboard_flush_bottom"
+
+    fun isKeyboardFlushBottom(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_KEYBOARD_FLUSH_BOTTOM, false)
+    }
+
+    fun setKeyboardFlushBottom(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_KEYBOARD_FLUSH_BOTTOM, enabled).apply()
+    }
+
     /** 键盘左边距（dp）：>0 时键盘左缘内收（宽度调节；左右独立，可整体偏移）。 */
     private const val KEY_KEYBOARD_MARGIN_START_DP = "keyboard_margin_start_dp"
 
