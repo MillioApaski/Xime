@@ -135,18 +135,28 @@ internal fun rememberImeKeyboardCallbacks(
             onHandwritingFinalize = { service.finalizeHandwritingPrediction() },
             onQuickSend = {},
             onKeyboardResize = {
-                val config = service.resources.configuration
-                val isLandscape = config.screenWidthDp > config.screenHeightDp
-                // 按当前屏宽收紧已存边距（横竖屏切换后旧值可能超出上限）
-                val maxMargin = KeyboardResizeBounds.maxHorizontalMarginDp(config.screenWidthDp)
-                service.uiState.value = service.uiState.value.copy(
-                    showKeyboardResize = true,
-                    resizePreviewHeightDp = SettingsPreferences.getKeyboardHeightDp(service, isLandscape),
-                    resizePreviewMarginStartDp = SettingsPreferences.getKeyboardMarginStartDp(service)
-                        .coerceIn(0, maxMargin),
-                    resizePreviewMarginEndDp = SettingsPreferences.getKeyboardMarginEndDp(service)
-                        .coerceIn(0, maxMargin),
-                )
+                if (service.isHostConstrained()) {
+                    // 独立 IME 面板：调节页按屏幕尺寸给的边界远大于面板，确定/取消按钮会
+                    // 落到可见区外关不掉，直接拒绝进入
+                    android.widget.Toast.makeText(
+                        service,
+                        "当前显示区域不支持键盘调节",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    val config = service.resources.configuration
+                    val isLandscape = config.screenWidthDp > config.screenHeightDp
+                    // 按当前屏宽收紧已存边距（横竖屏切换后旧值可能超出上限）
+                    val maxMargin = KeyboardResizeBounds.maxHorizontalMarginDp(config.screenWidthDp)
+                    service.uiState.value = service.uiState.value.copy(
+                        showKeyboardResize = true,
+                        resizePreviewHeightDp = SettingsPreferences.getKeyboardHeightDp(service, isLandscape),
+                        resizePreviewMarginStartDp = SettingsPreferences.getKeyboardMarginStartDp(service)
+                            .coerceIn(0, maxMargin),
+                        resizePreviewMarginEndDp = SettingsPreferences.getKeyboardMarginEndDp(service)
+                            .coerceIn(0, maxMargin),
+                    )
+                }
             },
             onReloadConfig = { service.schemaController.reloadConfig() },
             onSettings = { service.schemaController.openSettings() },

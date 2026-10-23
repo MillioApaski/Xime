@@ -340,6 +340,15 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
     }
 
     internal fun toggleFloatingMode(enabled: Boolean, floatingMinY: Int = 0) {
+        if (enabled && service.isHostConstrained()) {
+            // 独立 IME 面板：承载区比键盘还小，浮动卡片没有可拖动/可停靠的空间
+            android.widget.Toast.makeText(
+                service,
+                "当前显示区域不支持浮动键盘",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
         // 任何路径切悬浮都清掉拖动提示态（正常由拖动松手消费，这里兜底防光效残留）
         service.floatingExitHintState.value = false
         val isLandscape = service.resources.configuration.screenWidthDp > service.resources.configuration.screenHeightDp

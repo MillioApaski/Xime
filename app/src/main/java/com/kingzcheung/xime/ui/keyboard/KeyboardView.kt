@@ -435,6 +435,13 @@ fun KeyboardView(
                 voicePluginName = state.voicePluginName,
                 toolbarActions = state.toolbarButtons.mapNotNull { id ->
                     val item = resolveToolbarButtonItem(id, state.toolbarPluginButtons) ?: return@mapNotNull null
+                    // 承载区受限（独立 IME 面板）：浮动键盘没有意义也放不下，隐藏入口
+                    if (state.isHostConstrained &&
+                        item is ToolbarButtonItem.Builtin &&
+                        item.button == ToolbarButton.FLOAT
+                    ) {
+                        return@mapNotNull null
+                    }
                     // 与定制列表同一口径（关掉语音转文本 / 未装手写模型则不显示）
                     if (item is ToolbarButtonItem.Builtin &&
                         !isBuiltinToolbarButtonAvailable(
@@ -1430,6 +1437,8 @@ fun KeyboardView(
                             keyTextColor = keyTextColor,
                             isFloatingMode = state.isFloatingMode,
                             schemaSwitches = state.schemaSwitches,
+                            canResizeKeyboard = !state.isHostConstrained,
+                            canFloatKeyboard = !state.isHostConstrained,
                         ),
                         callbacks = MenuBarCallbacks(
                             onDismiss = { onHapticFeedback?.invoke(); viewModel.closeOverlay() },

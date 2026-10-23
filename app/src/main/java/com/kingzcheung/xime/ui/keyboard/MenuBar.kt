@@ -64,6 +64,9 @@ data class MenuBarState(
     val keyTextColor: Color = Color(0xFF202124),
     val isFloatingMode: Boolean = false,
     val schemaSwitches: List<SchemaSwitchUiState> = emptyList(),
+    /** 承载区受限（独立 IME 面板）时「键盘调节」「浮动键盘」不可用，入口隐藏。 */
+    val canResizeKeyboard: Boolean = true,
+    val canFloatKeyboard: Boolean = true,
 )
 
 data class MenuBarCallbacks(
@@ -133,7 +136,7 @@ fun MenuBar(
         MenuItem(icon = null, label = label, action = { callbacks.onToggleSchemaSwitch?.invoke(sw) }, textIcon = textIcon)
     }
 
-    val menuItems = remember(darkModeIcon, darkModeLabel, state.isFloatingMode, state.schemaSwitches) {
+    val menuItems = remember(darkModeIcon, darkModeLabel, state.isFloatingMode, state.schemaSwitches, state.canResizeKeyboard, state.canFloatKeyboard) {
         listOf(
             MenuItem(clipboardIcon, "剪贴板", callbacks.onClipboard),
             MenuItem(quickSendIcon, "快捷发送", callbacks.onQuickSend),
@@ -141,10 +144,12 @@ fun MenuBar(
             MenuItem(emojiIcon, "表情", callbacks.onEmoji),
         ) + switchItems + listOf(
             MenuItem(customizeIcon, "定制工具栏", callbacks.onToolbarCustomize),
-            // 悬浮模式下键盘内容为缩放的浮动卡片，高度不可调节，隐藏该入口
-            if (!state.isFloatingMode) MenuItem(keyboardResizeIcon, "键盘调节", callbacks.onKeyboardResize) else null,
+            // 悬浮模式下键盘内容为缩放的浮动卡片，高度不可调节，隐藏该入口；
+            // 承载区受限（独立 IME 面板）时调节页的操作按钮在面板里显示不全，同样隐藏
+            if (!state.isFloatingMode && state.canResizeKeyboard) MenuItem(keyboardResizeIcon, "键盘调节", callbacks.onKeyboardResize) else null,
             MenuItem(darkModeIcon, darkModeLabel, callbacks.onToggleDarkMode),
-            MenuItem(floatingIcon, floatingLabel, floatingAction),
+            // 承载区受限时浮动键盘无处安放，隐藏入口
+            if (state.canFloatKeyboard) MenuItem(floatingIcon, floatingLabel, floatingAction) else null,
             MenuItem(deployIcon, "部署方案", callbacks.onReloadConfig),
         ).filterNotNull()
     }
