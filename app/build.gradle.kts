@@ -1,10 +1,10 @@
-import com.android.build.api.dsl.ApplicationExtension
-import com.android.build.api.variant.FilterConfiguration
+import com.android.build.gradle.internal.api.BaseVariantOutputImpl
 import java.util.Base64
 import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
@@ -35,7 +35,7 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(keystorePropertiesFile.inputStream())
 }
 
-extensions.configure<ApplicationExtension> {
+android {
     namespace = "com.kingzcheung.xime"
     compileSdk = 37
     // 平台按小版本安装（SDK 里是 platforms;android-37.2），不写 minor 时 AGP 会去找 android-37.0
@@ -145,7 +145,7 @@ extensions.configure<ApplicationExtension> {
     // 测试 classpath 包含 main assets，使 T9Decoder() 无参构造可加载 pinyin_lm.bin
     sourceSets {
         getByName("test") {
-            resources.directories.add("src/main/assets")
+            resources.srcDirs("src/main/assets")
         }
     }
     lint {
@@ -166,20 +166,24 @@ extensions.configure<ApplicationExtension> {
     }
 }
 
-// Nightly 构建通过 androidComponents API 覆盖 versionCode/versionName；同时统一产物文件名
+android.applicationVariants.all {
+    val appName = "Xime"
+    outputs.all {
+        val abi = filters.find { it.filterType.toString() == "ABI" }?.identifier ?: "universal"
+        (this as BaseVariantOutputImpl).outputFileName = "$appName-$versionName-$abi.apk"
+    }
+}
+
+// Nightly 构建通过 androidComponents API 覆盖 versionCode/versionName
 androidComponents {
     onVariants { variant ->
         val vc = project.findProperty("versionCode")?.toString()?.toIntOrNull()
         val vn = project.findProperty("versionName")?.toString()
-        variant.outputs.forEach { output ->
-            if (vc != null && vn != null) {
+        if (vc != null && vn != null) {
+            variant.outputs.forEach { output ->
                 output.versionCode.set(vc)
                 output.versionName.set(vn)
             }
-            val abi = output.filters
-                .find { it.filterType == FilterConfiguration.FilterType.ABI }
-                ?.identifier ?: "universal"
-            output.outputFileName.set("Xime-${output.versionName.get()}-$abi.apk")
         }
     }
 }
