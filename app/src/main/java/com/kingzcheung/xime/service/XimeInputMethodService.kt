@@ -62,6 +62,7 @@ import com.kingzcheung.xime.ui.keyboard.FloatingCardGeometry
 import com.kingzcheung.xime.ui.keyboard.FloatingExitGlow
 import com.kingzcheung.xime.ui.keyboard.KeyboardResizeOverlay
 import com.kingzcheung.xime.ui.keyboard.KeyboardResizeBounds
+import com.kingzcheung.xime.ui.keyboard.KeyboardHostFit
 import com.kingzcheung.xime.ui.keyboard.HardwareKeyboardCandidateBar
 import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
@@ -277,6 +278,20 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     private val bottomInsetPxState = mutableStateOf(0)
     /** 左右 inset（px）：手机上键盘内容避让挖孔/横屏导航栏，平板不做避让（候选栏按钮靠边）。 */
     private val horizontalInsetPxState = mutableStateOf(0 to 0)
+    /**
+     * 宿主承载区（`android.R.id.inputArea`）实测高度 px；0 = 尚未测得。
+     *
+     * 手机/平板上它等于整屏高度，键盘恒装得下；独立 IME 面板（如 Horizon OS）
+     * 只给键盘一段区域，而 `configuration` 上报的屏高是整块虚拟屏，
+     * 键盘高度必须按这个实测值夹取（见 [KeyboardHostFit]）。
+     */
+    private val hostAreaHeightPxState = mutableStateOf(0)
+    private val hostAreaLayoutListener =
+        View.OnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
+            val h = bottom - top
+            if (h > 0 && h != hostAreaHeightPxState.value) hostAreaHeightPxState.value = h
+        }
+    private var hostAreaView: View? = null
     private var hasHardwareKeyboard = false
     /** 物理 Shift 按下到抬起之间是否有其他按键（组合输入大写等），抬起时据此决定是否切换中英文。 */
     private var shiftComboDetected = false
@@ -1490,10 +1505,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                     displayHeight
                 }
                 val floatScale = if (state.isFloatingMode) FloatingCardGeometry.CARD_SCALE else 1f
-                val effectiveKeyboardHeight = (keyboardHeight * floatScale).toInt()
                 val floatingDragBarHeight = if (state.isFloatingMode) FloatingCardGeometry.DRAG_BAR_HEIGHT_DP else 0
-                val floatingCardContentHeight = effectiveKeyboardHeight + floatingDragBarHeight
-                
+
                 val density = LocalDensity.current
                 // 统一使用 View 层多类型检测的 insets，避免 Compose
                 // navigationBars 恒为手势条高度导致与系统栏（三键导航）差异被抹平。
@@ -1545,6 +1558,35 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                     )
                 } else 0
                 val overlayPanelExtra = quickSendFormExtra + toolPanelExtra
+
+                // 键盘内容高度 = 期望值 ∩ 宿主承载区预算。
+                // 独立 IME 面板（如 Horizon OS 悬浮面板）只给键盘一段区域，而 configuration
+                // 上报的屏高是整块虚拟屏：按屏高百分比算出的高度会超出承载区，容器贴底后
+                // 顶边落到窗口外，只剩最后两行可见。手机/平板承载区 = 整屏，期望高度恒小于
+                // 预算 → 结果与改动前完全一致。
+                // 浮动键盘有自己的卡片几何与拖动语义，调节预览由用户显式指定高度，两者不夹取。
+                val requestedKeyboardHeight = (keyboardHeight * floatScale).toInt()
+                val hostAvailableDp = with(density) { hostAreaHeightPxState.value.toDp().value.toInt() }
+                val effectiveKeyboardHeight = if (state.isFloatingMode || state.showKeyboardResize) {
+                    requestedKeyboardHeight
+                } else {
+                    KeyboardHostFit.fitContentHeightDp(
+                        requestedDp = requestedKeyboardHeight,
+                        hostHeightDp = hostAvailableDp,
+                        reservedDp = state.keyboardBottomPaddingDp + activeBottomDp + floatingDragBarHeight,
+                        extraPanelDp = overlayPanelExtra,
+                    )
+                }
+                val floatingCardContentHeight = effectiveKeyboardHeight + floatingDragBarHeight
+                // 仅夹取生效时打一行，便于无真机的验证（"是否真的被承载区收缩了"）
+                LaunchedEffect(hostAvailableDp, effectiveKeyboardHeight) {
+                    if (effectiveKeyboardHeight < requestedKeyboardHeight) {
+                        Log.i(
+                            "XimeImeGeometry",
+                            "host=${hostAvailableDp}dp requested=${requestedKeyboardHeight}dp -> ${effectiveKeyboardHeight}dp"
+                        )
+                    }
+                }
 
                 XimeTheme(darkTheme = isDarkTheme, themeId = state.themeId) {
                     Box(modifier = Modifier.fillMaxSize()) {
@@ -1859,6 +1901,13 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                     // 栏外编码气泡越出容器顶边后进入 inputArea 空白区，
                     // inputArea 默认 clipChildren=true 会把越界部分裁掉。
                     area.clipChildren = false
+                    // 承载区高度变化（面板/分屏/旋转）实时同步给键盘高度预算
+                    if (hostAreaView !== area) {
+                        hostAreaView?.removeOnLayoutChangeListener(hostAreaLayoutListener)
+                        area.addOnLayoutChangeListener(hostAreaLayoutListener)
+                        hostAreaView = area
+                    }
+                    if (area.height > 0) hostAreaHeightPxState.value = area.height
                 }
             // 容器在 inputArea 内底部对齐（gravity BOTTOM）：
             // 容器物理高度 = Compose 内容总高，小于全屏窗口时若默认 top-left
@@ -1888,13 +1937,30 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 val bottomSpace = if (rawDp > 0) (rawDp - 8 - extraShrink).coerceAtLeast(0) else 0
                 val activeBottomDp = if (SettingsPreferences.isKeyboardFlushBottom(this)) 0
                     else if (bottomSpace == 0) 18 else bottomSpace
+                // 独立 IME 面板：承载区比屏高小得多，首帧高度同样要装得下
+                val fittedHeight = KeyboardHostFit.fitContentHeightDp(
+                    requestedDp = displayHeight,
+                    hostHeightDp = hostAreaHeightDp(),
+                    reservedDp = state.keyboardBottomPaddingDp + activeBottomDp,
+                )
                 view.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
-                    height = ((displayHeight + state.keyboardBottomPaddingDp + activeBottomDp) * density).toInt()
+                    height = ((fittedHeight + state.keyboardBottomPaddingDp + activeBottomDp) * density).toInt()
                 }
             }
         } catch (_: Exception) {}
     }
-    
+
+    /**
+     * 宿主承载区高度（dp）：优先用 `inputArea` 实测值；未测得（首帧前）退回 displayMetrics。
+     * 独立面板下二者一致（decor 已被系统裁到面板大小），手机上都是整屏 → 不产生额外约束。
+     */
+    private fun hostAreaHeightDp(): Int {
+        val density = resources.displayMetrics.density
+        if (density <= 0f) return 0
+        val px = hostAreaHeightPxState.value.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+        return (px / density).toInt()
+    }
+
     // ── ActionExecutor 实现 ──
 
     override fun performEditorMenuAction(actionId: Int) {
