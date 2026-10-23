@@ -1,5 +1,10 @@
 package com.kingzcheung.xime.ui.keyboard
 
+
+import com.kingzcheung.xime.R
+
+import com.kingzcheung.xime.i18n.tr
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -119,13 +124,13 @@ fun MenuBar(
     val settingsIcon = rememberVectorPainter(Icons.TwoTone.Settings)
 
     val darkModeLabel = when (state.darkMode) {
-        0 -> "深色模式"
-        1 -> "浅色模式"
-        else -> "跟随系统"
+        0 -> tr(R.string.s_shensemoshi)
+        1 -> tr(R.string.s_qiansemoshi)
+        else -> tr(R.string.s_gensuixitong)
     }
 
     val floatingIcon = rememberVectorPainter(Icons.TwoTone.PictureInPicture)
-    val floatingLabel = if (state.isFloatingMode) "退出悬浮" else "悬浮模式"
+    val floatingLabel = if (state.isFloatingMode) tr(R.string.s_tuichuxuanfu) else tr(R.string.s_xuanfumoshi)
     val floatingAction = callbacks.onFloatingModeToggle ?: {}
 
     // 动态方案开关：图标取第一个状态的首字；标题若有 abbrev 则用 abbrev（多个用 🔁 连接），否则用所有状态 🔁 连接
@@ -138,19 +143,19 @@ fun MenuBar(
 
     val menuItems = remember(darkModeIcon, darkModeLabel, state.isFloatingMode, state.schemaSwitches, state.canResizeKeyboard, state.canFloatKeyboard) {
         listOf(
-            MenuItem(clipboardIcon, "剪贴板", callbacks.onClipboard),
-            MenuItem(quickSendIcon, "快捷发送", callbacks.onQuickSend),
-            MenuItem(schemaIcon, "输入方案", callbacks.onSchemaList),
-            MenuItem(emojiIcon, "表情", callbacks.onEmoji),
+            MenuItem(clipboardIcon, tr(R.string.s_jiantieban), callbacks.onClipboard),
+            MenuItem(quickSendIcon, tr(R.string.s_kuaijiefasong), callbacks.onQuickSend),
+            MenuItem(schemaIcon, tr(R.string.s_shurufangan), callbacks.onSchemaList),
+            MenuItem(emojiIcon, tr(R.string.s_biaoqing), callbacks.onEmoji),
         ) + switchItems + listOf(
-            MenuItem(customizeIcon, "定制工具栏", callbacks.onToolbarCustomize),
+            MenuItem(customizeIcon, tr(R.string.s_dingzhigongjulan), callbacks.onToolbarCustomize),
             // 悬浮模式下键盘内容为缩放的浮动卡片，高度不可调节，隐藏该入口；
             // 承载区受限（独立 IME 面板）时调节页的操作按钮在面板里显示不全，同样隐藏
-            if (!state.isFloatingMode && state.canResizeKeyboard) MenuItem(keyboardResizeIcon, "键盘调节", callbacks.onKeyboardResize) else null,
+            if (!state.isFloatingMode && state.canResizeKeyboard) MenuItem(keyboardResizeIcon, tr(R.string.s_jianpandiaojie), callbacks.onKeyboardResize) else null,
             MenuItem(darkModeIcon, darkModeLabel, callbacks.onToggleDarkMode),
             // 承载区受限时浮动键盘无处安放，隐藏入口
             if (state.canFloatKeyboard) MenuItem(floatingIcon, floatingLabel, floatingAction) else null,
-            MenuItem(deployIcon, "部署方案", callbacks.onReloadConfig),
+            MenuItem(deployIcon, tr(R.string.s_bushufangan), callbacks.onReloadConfig),
         ).filterNotNull()
     }
     Column(
@@ -177,7 +182,7 @@ fun MenuBar(
             ) {
                 Icon(
                     imageVector = Icons.Default.KeyboardArrowUp,
-                    contentDescription = "关闭菜单",
+                    contentDescription = tr(R.string.s_guanbicaidan),
                     tint = textColor,
                     modifier = Modifier.size(24.dp)
                 )
@@ -192,7 +197,7 @@ fun MenuBar(
             ) {
                 Icon(
                     painter = settingsIcon,
-                    contentDescription = "设置",
+                    contentDescription = tr(R.string.s_shezhi),
                     tint = textColor,
                     modifier = Modifier.size(24.dp)
                 )

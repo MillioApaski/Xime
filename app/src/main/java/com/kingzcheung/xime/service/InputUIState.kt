@@ -1,5 +1,9 @@
 package com.kingzcheung.xime.service
 
+import com.kingzcheung.xime.R
+
+import com.kingzcheung.xime.i18n.tr
+
 import com.kingzcheung.xime.settings.SchemaInfo
 import com.kingzcheung.xime.settings.SettingsPreferences
 import com.kingzcheung.xime.speech.RecognitionState
@@ -14,7 +18,7 @@ data class InputUIState(
     val currentSchemaId: String = "",
     val schemas: List<SchemaInfo> = emptyList(),
     val schemaSwitches: List<SchemaSwitchUiState> = emptyList(),
-    val enterKeyText: String = "发送",
+    val enterKeyText: String = tr(R.string.s_fasong),
     val darkMode: Int = 0,
     val themeId: String = "ocean_blue",
     val isSttEnabled: Boolean = false,

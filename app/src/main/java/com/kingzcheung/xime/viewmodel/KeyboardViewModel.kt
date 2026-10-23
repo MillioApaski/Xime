@@ -1,5 +1,9 @@
 package com.kingzcheung.xime.viewmodel
 
+import com.kingzcheung.xime.R
+
+import com.kingzcheung.xime.i18n.tr
+
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -52,7 +56,7 @@ data class KeyboardUiState(
     val currentSchemaId: String = "",
     val schemas: List<SchemaInfo> = emptyList(),
     val schemaSwitches: List<SchemaSwitchUiState> = emptyList(),
-    val enterKeyText: String = "发送",
+    val enterKeyText: String = tr(R.string.s_fasong),
     val isDarkTheme: Boolean = false,
     val darkMode: Int = 2,
     val themeId: String = "ocean_blue",

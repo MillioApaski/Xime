@@ -1,5 +1,7 @@
 package com.kingzcheung.xime.ui.keyboard
 
+import com.kingzcheung.xime.i18n.tr
+
 import com.kingzcheung.xime.service.PredictionManager
 import android.annotation.SuppressLint
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -372,7 +374,7 @@ fun CandidateBar(
                             ) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                                    contentDescription = "返回菜单",
+                                    contentDescription = tr(R.string.s_fanhuicaidan),
                                     tint = visuals.accentColor,
                                     modifier = Modifier.size(24.dp)
                                 )
@@ -388,7 +390,7 @@ fun CandidateBar(
                             ) {
                                 Icon(
                                     painter = painterResource(id = if (visuals.isDarkTheme) R.drawable.logo_dark else R.drawable.logo),
-                                    contentDescription = "曦码 Logo",
+                                    contentDescription = tr(R.string.s_xima_logo),
                                     tint = Color.Unspecified,
                                     modifier = Modifier.size(20.dp)
                                 )
@@ -403,7 +405,7 @@ fun CandidateBar(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ContentCopy,
-                                contentDescription = "剪切板",
+                                contentDescription = tr(R.string.s_jianqieban),
                                 tint = visuals.accentColor,
                                 modifier = Modifier.size(16.dp)
                             )
@@ -586,7 +588,7 @@ fun CandidateBar(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.KeyboardArrowDown,
-                                contentDescription = "收起键盘",
+                                contentDescription = tr(R.string.s_shouqijianpan),
                                 tint = if (isHideKeyboardPressed) iconButtonTint.copy(alpha = 0.6f) else iconButtonTint,
                                 modifier = Modifier.size(22.dp)
                             )
@@ -605,7 +607,7 @@ fun CandidateBar(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.KeyboardArrowUp,
-                                contentDescription = "返回键盘",
+                                contentDescription = tr(R.string.s_fanhuijianpan),
                                 tint = visuals.accentColor,
                                 modifier = Modifier.size(24.dp)
                             )
@@ -642,7 +644,7 @@ fun CandidateBar(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "清空",
+                            text = tr(R.string.s_qingkong),
                             color = if (isClearPressed) visuals.textColor.copy(alpha = 0.6f) else visuals.textColor,
                             fontSize = 11.sp
                         )
@@ -673,7 +675,7 @@ fun CandidateBar(
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = "更多候选",
+                            contentDescription = tr(R.string.s_gengduohouxuan),
                             tint = if (isMorePressed) visuals.textColor.copy(alpha = 0.6f) else visuals.textColor,
                             modifier = Modifier.size(22.dp)
                         )
@@ -751,7 +753,7 @@ fun ClipboardImageCandidateItem(
         }
         Spacer(modifier = Modifier.width(6.dp))
         Text(
-            text = "图片",
+            text = tr(R.string.s_tupian_2),
             color = textColor,
             // 标注型标签：比候选文字小一档，并夹住上下限（超大字号设置下也不至于撑满芯片）
             fontSize = (fontSize.value * 0.7f).coerceIn(11f, 16f).sp,
