@@ -1,5 +1,9 @@
 package com.kingzcheung.xime.ui.keyboard
 
+import com.kingzcheung.xime.R
+
+import com.kingzcheung.xime.i18n.tr
+
 import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -473,7 +477,7 @@ fun KeyboardView(
                                 if (PermissionHelper.hasRecordAudioPermission(toolbarContext)) {
                                     callbacks.onVoiceStickyToggle?.invoke()
                                 } else {
-                                    android.widget.Toast.makeText(toolbarContext, "需要麦克风权限才能使用语音输入", android.widget.Toast.LENGTH_SHORT).show()
+                                    android.widget.Toast.makeText(toolbarContext, tr(R.string.s_xuyaomaikefengquanxiancainengs_3b6e4), android.widget.Toast.LENGTH_SHORT).show()
                                     PermissionHelper.requestRecordAudioPermission(toolbarContext)
                                 }
                             })
@@ -1334,21 +1338,21 @@ fun KeyboardView(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = state.deploymentMessage.ifEmpty { "正在初始化..." },
+                        text = state.deploymentMessage.ifEmpty { tr(R.string.s_zhengzaichushihua) },
                         color = keyTextColor,
                         style = androidx.compose.material3.MaterialTheme.typography.bodyLarge
                     )
                     if (isError) {
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = "点击关闭",
+                            text = tr(R.string.s_dianjiguanbi),
                             color = keyTextColor.copy(alpha = 0.5f),
                             style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                             textAlign = TextAlign.Center
                         )
                     } else {
                         Text(
-                            text = "请稍候",
+                            text = tr(R.string.s_qingshaohou),
                             color = keyTextColor.copy(alpha = 0.7f),
                             style = androidx.compose.material3.MaterialTheme.typography.bodyMedium
                         )
@@ -1380,13 +1384,13 @@ fun KeyboardView(
                 ) {
                     Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
                         Text(
-                            text = "删除自造词",
+                            text = tr(R.string.s_shanchuzizaoci),
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            text = "将「${pending.word}」从用户词典中移除？",
+                            text = tr(R.string.s_jiang_congyonghucidianzhongyichu, pending.word),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1399,7 +1403,7 @@ fun KeyboardView(
                                 onHapticFeedback?.invoke()
                                 deletePending = null
                             }) {
-                                Text("取消", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(tr(R.string.s_quxiao), color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Spacer(Modifier.width(4.dp))
                             TextButton(onClick = {
@@ -1407,7 +1411,7 @@ fun KeyboardView(
                                 deletePending = null
                                 pending.onConfirm()
                             }) {
-                                Text("删除", color = MaterialTheme.colorScheme.error)
+                                Text(tr(R.string.s_shanchu), color = MaterialTheme.colorScheme.error)
                             }
                         }
                     }

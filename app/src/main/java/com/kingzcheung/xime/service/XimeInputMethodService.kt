@@ -1,5 +1,10 @@
 package com.kingzcheung.xime.service
 
+import com.kingzcheung.xime.R
+
+import com.kingzcheung.xime.i18n.tr
+
+import android.content.Context
 import android.content.Intent
 import android.inputmethodservice.InputMethodService
 import android.os.Build
@@ -102,6 +107,7 @@ import com.kingzcheung.xime.rime.RimeCandidate
 import com.kingzcheung.xime.rime.resolveRimeCandidateIndex
 
 import com.kingzcheung.xime.correction.KeyTapLogger
+import com.kingzcheung.xime.settings.AppLocale
 import com.kingzcheung.xime.settings.SchemaConfigHelper
 import com.kingzcheung.xime.settings.SchemaManager
 import com.kingzcheung.xime.settings.SettingsPreferences
@@ -177,6 +183,20 @@ object ToolPanelEditTextHolder {
 data class T9PartialSegment(val text: String, val pinyin: String)
 
 class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner, ActionExecutor {
+
+    override fun attachBaseContext(newBase: Context) {
+        // 键盘与设置页共用同一语言（zh-MO 归一化到 zh-HK）
+        localeBaseContext = newBase
+        super.attachBaseContext(AppLocale.wrap(newBase))
+    }
+
+    /** 语言覆盖前的原始 Context，用于切换语言后重建 Compose 资源。 */
+    private var localeBaseContext: Context? = null
+
+    /** 按当前语言重新包装 Context（语言切换后 Compose 需要新资源）。 */
+    private fun localizedContext(): Context = AppLocale.wrap(localeBaseContext ?: this)
+
+    private var lastLocales: android.os.LocaleList = android.os.LocaleList.getDefault()
 
     companion object {
         internal const val TAG = "XimeInputMethodService"
@@ -736,11 +756,11 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         
         val initJob = serviceScope.launch(Dispatchers.IO) {
             try {
-                notifyDeploymentStatus(true, "正在初始化...")
+                notifyDeploymentStatus(true, tr(R.string.s_zhengzaichushihua))
                 
                 val (userDataDir, sharedDataDir) = RimeConfigHelper.initializeRimeDataAsync(this@XimeInputMethodService)
                 
-                notifyDeploymentStatus(true, "正在加载输入法引擎...")
+                notifyDeploymentStatus(true, tr(R.string.s_zhengzaijiazaishurufayinqing))
                 rimeEngine.initialize(userDataDir, sharedDataDir)
 
                 // 检查词库是否已部署（deploymentDone 标记 + 部署 hash 一致）
@@ -750,7 +770,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 if (needsDeployment) {
                     // 统一部署入口（进程内互斥，hash 一致时内部跳过）。
                     // 与 XimeApplication 预初始化共享，避免两者并发触发两次全量编译。
-                    notifyDeploymentStatus(true, "正在编译词库...")
+                    notifyDeploymentStatus(true, tr(R.string.s_zhengzaibianyiciku))
                     if (RimeConfigHelper.ensureDeployment(this@XimeInputMethodService)) {
                         rimeEngine.updateLastBuildTime()
                     } else {
@@ -820,7 +840,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                                 FileLogger.w(TAG, "initRimeEngine: handwriting model missing, keep full keyboard")
                                 android.widget.Toast.makeText(
                                     this@XimeInputMethodService,
-                                    "请先下载手写模型",
+                                    tr(R.string.s_qingxianxiazaishouxiemoxing),
                                     android.widget.Toast.LENGTH_LONG
                                 ).show()
                             }
@@ -857,7 +877,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 }
             } catch (e: Exception) {
                 FileLogger.e(TAG, "initRimeEngine: Failed to initialize Rime engine", e)
-                notifyDeploymentStatus(false, "初始化失败")
+                notifyDeploymentStatus(false, tr(R.string.s_chushihuashibai))
             }
         }
         
@@ -872,7 +892,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 FileLogger.w(TAG, "initRimeEngine: Watchdog triggered - native init appears stuck, forcing loading state cleared")
                 uiState.value = uiState.value.copy(
                     isDeploying = false,
-                    deploymentMessage = "初始化超时，请重启输入法"
+                    deploymentMessage = tr(R.string.s_chushihuachaoshi_qingzhongqish_4e17f)
                 )
             }
         }
@@ -1074,7 +1094,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         if (uiState.value.isFloatingMode ||
             resources.configuration.screenWidthDp > resources.configuration.screenHeightDp
         ) {
-            Toast.makeText(this, "工具面板不支持在悬浮/横屏模式下使用", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, tr(R.string.s_gongjumianbanbuzhichizaixuanfu_69e6b), Toast.LENGTH_SHORT).show()
             return
         }
         if (uiState.value.showQuickSendForm) {
@@ -1129,7 +1149,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             toolPanelUiNodes = null,
             toolPanelLoading = false,
             toolPanelRequestEpoch = epoch,
-            enterKeyText = if (display == ToolResult.PASSIVE) "发送" else "生成",
+            enterKeyText = if (display == ToolResult.PASSIVE) tr(R.string.s_fasong) else tr(R.string.s_shengcheng),
         )
         scheduleToolPanelLoading(epoch)
         serviceScope.launch(Dispatchers.IO) {
@@ -1226,7 +1246,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             toolPanelDisplay = null,
             toolPanelUiNodes = null,
             toolPanelLoading = false,
-            enterKeyText = "发送",
+            enterKeyText = tr(R.string.s_fasong),
         )
         ToolPanelEditTextHolder.editText = null
         ToolPanelEditTextHolder.main = null
@@ -1465,7 +1485,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
             }
         }
         
-        val composeView = ComposeView(this).apply {
+        val composeView = ComposeView(localizedContext()).apply {
             isFocusable = true
             isFocusableInTouchMode = true
             composeViewRef = this
@@ -1640,7 +1660,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                                     if (cand.isShowingRecentClipboard &&
                                         recentClipboardItemsState.value.getOrNull(i)?.isImage == true
                                     ) {
-                                        "图片"
+                                        tr(R.string.s_tupian_2)
                                     } else {
                                         text
                                     }
@@ -2238,7 +2258,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                         if (!modelFile.exists() || !charIndexFile.exists()) {
                             FileLogger.w(TAG, "Handwriting model not found, falling back to first available schema")
                             android.widget.Toast.makeText(
-                                this, "请先下载手写模型", android.widget.Toast.LENGTH_LONG
+                                this, tr(R.string.s_qingxianxiazaishouxiemoxing), android.widget.Toast.LENGTH_LONG
                             ).show()
                             val fallbackSchema = if (availableSchemas.isNotEmpty()) {
                                 availableSchemas.first()
@@ -2556,6 +2576,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        val localeChanged = newConfig.locales != lastLocales
+        lastLocales = newConfig.locales
         hasHardwareKeyboard = SettingsPreferences.isHardwareKeyboardDetectionEnabled(this) &&
             newConfig.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS
         super.onConfigurationChanged(newConfig)
@@ -2566,6 +2588,11 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         loadDarkModePreference()
         applyWindowBackground()
         updateCursorUpdateMonitoring()
+        if (localeChanged) {
+            // 系统语言变化：刷新全局取词并重建键盘，Compose 才能取到新语言资源
+            com.kingzcheung.xime.i18n.UiText.init(AppLocale.wrap(this, newConfig))
+            if (isInputViewShown) setInputView(onCreateInputView())
+        }
     }
 
     internal fun applyWindowBackground() {
@@ -2658,13 +2685,13 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         val action = imeOptions and EditorInfo.IME_MASK_ACTION
         val noEnterAction = imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0
         val enterText = when {
-            noEnterAction -> "换行"
-            action == EditorInfo.IME_ACTION_GO -> "前往"
-            action == EditorInfo.IME_ACTION_SEARCH -> "搜索"
-            action == EditorInfo.IME_ACTION_SEND -> "发送"
-            action == EditorInfo.IME_ACTION_NEXT -> "下一项"
-            action == EditorInfo.IME_ACTION_DONE -> "完成"
-            else -> "换行"
+            noEnterAction -> tr(R.string.s_huanxing)
+            action == EditorInfo.IME_ACTION_GO -> tr(R.string.s_qianwang)
+            action == EditorInfo.IME_ACTION_SEARCH -> tr(R.string.s_sousuo)
+            action == EditorInfo.IME_ACTION_SEND -> tr(R.string.s_fasong)
+            action == EditorInfo.IME_ACTION_NEXT -> tr(R.string.s_xiayixiang)
+            action == EditorInfo.IME_ACTION_DONE -> tr(R.string.s_wancheng)
+            else -> tr(R.string.s_huanxing)
         }
         uiState.value = uiState.value.copy(enterKeyText = enterText)
     }
@@ -2702,7 +2729,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 quickSendEditingItemId = null,
                 quickSendEditingItemText = "",
                 quickSendEditingItemCode = "",
-                enterKeyText = "发送",
+                enterKeyText = tr(R.string.s_fasong),
             )
             QuickSendFormEditTextHolder.editText = null
             QuickSendFormCodeEditTextHolder.editText = null

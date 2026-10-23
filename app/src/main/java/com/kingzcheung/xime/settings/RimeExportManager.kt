@@ -1,5 +1,9 @@
 package com.kingzcheung.xime.settings
 
+import com.kingzcheung.xime.R
+
+import com.kingzcheung.xime.i18n.tr
+
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -57,7 +61,7 @@ object RimeExportManager {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             clipData = android.content.ClipData.newRawUri(null, uri)
         }
-        val chooser = Intent.createChooser(intent, "分享文件")
+        val chooser = Intent.createChooser(intent, tr(R.string.s_fenxiangwenjian))
         context.startActivity(chooser)
     }
 
@@ -132,7 +136,7 @@ object RimeExportManager {
         return try {
             val rimeDir = File(context.filesDir, "rime")
             if (!rimeDir.exists()) {
-                return Result.failure(Exception("Rime 目录不存在"))
+                return Result.failure(Exception(tr(R.string.s_rime_mulubucunzai)))
             }
             val installationId = SettingsPreferences.getRimeInstallationId(context)
 
@@ -165,7 +169,7 @@ object RimeExportManager {
 
             if (archive.length() == 0L) {
                 archive.delete()
-                return Result.failure(Exception("没有可导出的文件"))
+                return Result.failure(Exception(tr(R.string.s_meiyoukedaochudewenjian)))
             }
             Result.success(fileName to archive)
         } catch (e: Exception) {
