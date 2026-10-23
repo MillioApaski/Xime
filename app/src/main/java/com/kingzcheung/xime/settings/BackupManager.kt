@@ -272,6 +272,7 @@ object BackupManager {
             val manifestsDir = SchemaManifestManager.getManifestsDir(filesDir)
             var entryCount = 0
             var dictSnapshotCount = 0
+            var skippedUserDbEntries = 0
             ZipInputStream(rawInput).use { zis ->
                 while (true) {
                     val entry = zis.nextEntry ?: break
@@ -322,6 +323,14 @@ object BackupManager {
                     ) {
                         return Result.failure(Exception("备份包包含非法路径: $name"))
                     }
+                    // 词库**只合并不覆盖**：包内若带 leveldb 用户词典（旧版本打的包会带），
+                    // 落盘就是整库覆盖，本机新打的词当场消失。词库统一由
+                    // `sync/*.userdb.txt` 快照按时间戳合并进来（见 [afterRestore]）。
+                    if (isUserDbLeveldbEntry(name)) {
+                        skippedUserDbEntries++
+                        zis.closeEntry()
+                        continue
+                    }
                     target.parentFile?.mkdirs()
                     target.outputStream().use { zis.copyTo(it) }
                     if (name.startsWith("sync/") && name.endsWith(".userdb.txt")) dictSnapshotCount++
@@ -330,6 +339,9 @@ object BackupManager {
                 }
             }
             if (entryCount == 0) return Result.failure(Exception("备份包为空"))
+            if (skippedUserDbEntries > 0) {
+                Log.i(TAG, "Restore: 跳过包内 leveldb 用户词典 $skippedUserDbEntries 个条目（词库走快照合并）")
+            }
             return Result.success(RestoreOutcome(entryCount, dictSnapshotCount))
         } catch (e: Exception) {
             return Result.failure(e)
@@ -339,6 +351,21 @@ object BackupManager {
     /** 元数据 id 安全性：非空且不含路径分隔符（防 marketplace/manifests 目录穿越）。 */
     private fun isSafeId(id: String): Boolean =
         id.isNotBlank() && !id.contains('/') && !id.contains('\\') && id != "." && id != ".."
+
+    /**
+     * 包内条目是否是 leveldb 用户词典（`<词典名>.userdb/` 目录下的文件，或 `*.db*`）。
+     *
+     * 恢复时**一律跳过**：这类文件落盘等于整库覆盖，会吃掉本机新打的词。
+     * 词库只走 `sync/<id>/<词典名>.userdb.txt` 快照，由 librime 按时间戳合并
+     * （`UserDbMerger` 取 commits/dee 最大值，只增不减）。纯函数，单测锚定。
+     *
+     * 注意别误伤快照 `.userdb.txt`：它以 `.userdb.txt` 结尾，不是 `.userdb` 段。
+     */
+    internal fun isUserDbLeveldbEntry(relativePath: String): Boolean {
+        val path = relativePath.replace('\\', '/')
+        if (path.split('/').any { it.endsWith(".userdb") }) return true
+        return path.endsWith(".db") || path.endsWith(".db-wal") || path.endsWith(".db-shm")
+    }
 
     /** 目标必须落在 baseDir 内（防元数据条目穿越），否则抛异常中止恢复。 */
     private fun writeChecked(target: File, baseDir: File, data: ByteArray) {
