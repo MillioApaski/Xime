@@ -83,6 +83,8 @@ data class KeyboardUiState(
     val isInputSessionRestarting: Boolean = false,
     val isFloatingMode: Boolean = false,
     val isHandwritingMode: Boolean = false,
+    /** 承载区受限（独立 IME 面板）：按屏高算出的键盘装不进实际显示区域。 */
+    val isHostConstrained: Boolean = false,
     val floatingOffsetX: Int = 0,
     val floatingOffsetY: Int = 0,
     val t9ResetSignal: Long = 0L,

@@ -289,7 +289,14 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     private val hostAreaLayoutListener =
         View.OnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
             val h = bottom - top
-            if (h > 0 && h != hostAreaHeightPxState.value) hostAreaHeightPxState.value = h
+            if (h > 0 && h != hostAreaHeightPxState.value) {
+                hostAreaHeightPxState.value = h
+                // 承载区比键盘还小（独立 IME 面板）：上次会话留下的浮动键盘无处安放，
+                // 直接退回停靠态，否则用户找不到退出悬浮的入口（入口已隐藏）
+                if (uiState.value.isFloatingMode && isHostConstrained()) {
+                    schemaController.toggleFloatingMode(false)
+                }
+            }
         }
     private var hostAreaView: View? = null
     private var hasHardwareKeyboard = false
@@ -1567,6 +1574,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 // 浮动键盘有自己的卡片几何与拖动语义，调节预览由用户显式指定高度，两者不夹取。
                 val requestedKeyboardHeight = (keyboardHeight * floatScale).toInt()
                 val hostAvailableDp = with(density) { hostAreaHeightPxState.value.toDp().value.toInt() }
+                val hostConstrained = isHostConstrained()
                 val effectiveKeyboardHeight = if (state.isFloatingMode || state.showKeyboardResize) {
                     requestedKeyboardHeight
                 } else {
@@ -1585,6 +1593,12 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                             "XimeImeGeometry",
                             "host=${hostAvailableDp}dp requested=${requestedKeyboardHeight}dp -> ${effectiveKeyboardHeight}dp"
                         )
+                    }
+                }
+                // 兜底：承载区受限时调节页的确定/取消按钮会落到可见区外（关不掉），强制退出
+                LaunchedEffect(hostConstrained) {
+                    if (hostConstrained && uiState.value.showKeyboardResize) {
+                        uiState.value = uiState.value.copy(showKeyboardResize = false)
                     }
                 }
 
@@ -1693,6 +1707,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                                 state,
                                 isDarkTheme,
                                 effectiveKeyboardHeight,
+                                hostConstrained,
                                 floatingMinY,
                             isHandwritingMode,
                             clipboardItemsState.value,
@@ -1730,6 +1745,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                                     inputSessionId = state.inputSessionId,
                                     isInputSessionRestarting = state.isInputSessionRestarting,
                                     isFloatingMode = state.isFloatingMode,
+                                    isHostConstrained = hostConstrained,
                                     isHandwritingMode = isHandwritingMode,
                                     floatingOffsetX = state.floatingOffsetX,
                                     floatingOffsetY = state.floatingOffsetY,
@@ -1959,6 +1975,25 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         if (density <= 0f) return 0
         val px = hostAreaHeightPxState.value.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
         return (px / density).toInt()
+    }
+
+    /**
+     * 承载区受限：按配置屏高算出的键盘高度装不进系统实际给的空间（独立 IME 面板、极小窗口）。
+     *
+     * 此时 `configuration` 上报的屏幕尺寸不代表可用空间，依赖屏幕尺寸的
+     * 「浮动键盘」「键盘调节」都无法正确工作 —— 入口隐藏、调用直接拒绝。
+     * 普通手机/平板上键盘恒小于承载区，判定恒为 false，行为不变。
+     */
+    internal fun isHostConstrained(): Boolean {
+        val px = hostAreaHeightPxState.value
+        if (px <= 0) return false
+        val density = resources.displayMetrics.density
+        if (density <= 0f) return false
+        val config = resources.configuration
+        val isLandscape = config.screenWidthDp > config.screenHeightDp
+        val requested = SettingsPreferences.getKeyboardHeightDp(this, isLandscape)
+            .coerceAtMost(config.screenHeightDp * 8 / 10)
+        return KeyboardHostFit.isHostConstrained(requested, (px / density).toInt())
     }
 
     // ── ActionExecutor 实现 ──

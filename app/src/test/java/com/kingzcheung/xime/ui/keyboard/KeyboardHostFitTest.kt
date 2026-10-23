@@ -1,6 +1,8 @@
 package com.kingzcheung.xime.ui.keyboard
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -22,11 +24,12 @@ class KeyboardHostFitTest {
     }
 
     @Test
-    fun `landscape phone with tool panel keeps its preferred height`() {
-        // 横屏 411dp 屏、键盘 228dp、底部留白 18dp：本体装得下 → 不动键高，
-        // 撑高面板（180dp）沿用既有"容器向上溢出"的行为（普通设备零影响）
+    fun `landscape phone with tool panel keeps whole content inside the window`() {
+        // 横屏 411dp 屏、键盘 228dp、留白 18dp、工具面板 180dp
+        // ⇒ 228 + 18 + 180 = 426dp 本来就越界（改动前工具面板顶部被裁掉 15dp）。
+        // 所有内容共同服从预算：留白与面板不变，键盘本体压到 411 - 18 - 180 = 213dp。
         assertEquals(
-            228,
+            213,
             KeyboardHostFit.fitContentHeightDp(
                 requestedDp = 228,
                 hostHeightDp = 411,
@@ -37,17 +40,16 @@ class KeyboardHostFitTest {
     }
 
     @Test
-    fun `quest panel shares one budget between keyboard and tool panel`() {
-        // 本体已超预算（825 > 500-18）→ 面板与键盘共用预算：500-18-180 = 302dp
-        assertEquals(
-            302,
-            KeyboardHostFit.fitContentHeightDp(
-                requestedDp = 825,
-                hostHeightDp = 500,
-                reservedDp = 18,
-                extraPanelDp = 180,
-            ),
+    fun `tool panel is counted even when keyboard body alone fits`() {
+        // 用户指出的漏洞：键盘本体 400 <= 500 - 18，但加上 180 面板后 598 > 500
+        val fitted = KeyboardHostFit.fitContentHeightDp(
+            requestedDp = 400,
+            hostHeightDp = 500,
+            reservedDp = 18,
+            extraPanelDp = 180,
         )
+        assertEquals(302, fitted)
+        assertEquals(500, fitted + 18 + 180)
     }
 
     @Test
@@ -73,10 +75,26 @@ class KeyboardHostFitTest {
     }
 
     @Test
-    fun `overlay panel larger than host never yields negative height`() {
+    fun `impossible budget keeps a usable keyboard instead of squashing it to nothing`() {
+        // 留白+面板就把承载区吃光了：键盘不低于 120dp（宁可面板溢出，也不让按键消失）
         assertEquals(
-            0,
+            KeyboardHostFit.MIN_CONTENT_HEIGHT_DP,
             KeyboardHostFit.fitContentHeightDp(requestedDp = 200, hostHeightDp = 500, reservedDp = 700),
         )
+        // 期望值本来就比下限还小时，保期望值，不反向放大
+        assertEquals(
+            80,
+            KeyboardHostFit.fitContentHeightDp(requestedDp = 80, hostHeightDp = 500, reservedDp = 700),
+        )
+    }
+
+    @Test
+    fun `host smaller than the keyboard means the reported screen is not the real space`() {
+        // Quest：屏高 1766dp 算出 825dp 键盘，承载区只有 500dp → 配置不可信
+        assertTrue(KeyboardHostFit.isHostConstrained(requestedDp = 825, hostHeightDp = 500))
+        // 横屏手机：228dp 键盘装进 411dp 承载区 → 正常设备
+        assertFalse(KeyboardHostFit.isHostConstrained(requestedDp = 228, hostHeightDp = 411))
+        // 尚未测得承载区 → 不做判断
+        assertFalse(KeyboardHostFit.isHostConstrained(requestedDp = 825, hostHeightDp = 0))
     }
 }
