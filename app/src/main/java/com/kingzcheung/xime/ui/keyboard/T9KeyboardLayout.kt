@@ -1,5 +1,7 @@
 package com.kingzcheung.xime.ui.keyboard
 
+import com.kingzcheung.xime.i18n.tr
+
 import android.annotation.SuppressLint
 import android.content.res.Configuration
 import android.widget.Toast
@@ -64,6 +66,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -465,7 +468,7 @@ private fun T9KeyboardContent(
 
     /** 数字键键面字母：keys.<id>.tap.label 可覆盖，未配置回退内置默认（无默认时显示数字本身）。 */
     fun digitLetters(id: String): String =
-        KeysConfigHelper.getT9KeyLabel(id) ?: DEFAULT_T9_DIGIT_LETTERS[id] ?: id
+        KeysConfigHelper.getT9KeyLabel(id) ?: defaultT9DigitLetters()[id] ?: id
 
     /** 数字键长按候选：keys.<id>.long_press 可覆盖（显示 label 缺省 value），未配置回退内置默认。 */
     fun digitLongPress(id: String): List<String>? =
@@ -695,7 +698,7 @@ private fun T9KeyboardContent(
         when (id) {
             "candidates" -> CandidatesPanel(modifier)
             "symbol" -> KeyButton(
-                text = "符号",
+                text = stringResource(R.string.keyboard_symbol),
                 onClick = { onKeyPress("symbol") },
                 backgroundColor = specialKeyBackgroundColor,
                 textColor = specialKeyTextColor,
@@ -739,7 +742,7 @@ private fun T9KeyboardContent(
                 onClick = { onKeyPress("ime_switch") },
                 backgroundColor = keyBackgroundColor, iconColor = keyTextColor,
                 modifier = modifier,
-                a11yDescription = "中英切换",
+                a11yDescription = tr(R.string.s_zhongyingqiehuan),
                 onPress = { onKeyPressDown?.invoke("ime_switch") },
                 shadowEnabled = shadowEnabled, shadowElevation = shadowElevation, shadowShapeRadius = shadowShapeRadius,
             )
@@ -750,12 +753,12 @@ private fun T9KeyboardContent(
                 backgroundColor = specialKeyBackgroundColor,
                 iconColor = specialKeyTextColor,
                 modifier = modifier,
-                a11yDescription = "退格",
-                swipeText = if (compactMode) null else "清空",
+                a11yDescription = stringResource(R.string.keyboard_delete),
+                swipeText = if (compactMode) null else stringResource(R.string.keyboard_clear),
                 onSwipe = { onKeyPress("clear_composition") },
                 onPress = { onKeyPressDown?.invoke("delete") },
-                swipeUpLabel = if (compactMode) null else "上滑清空",
-                swipeDownLabel = if (compactMode) null else "下滑撤回",
+                swipeUpLabel = if (compactMode) null else tr(R.string.s_shanghuaqingkong),
+                swipeDownLabel = if (compactMode) null else tr(R.string.s_xiahuachehui),
                 onSwipeUp = {
                     controller.clearAll()
                     onKeyPress("clear_all")
@@ -851,8 +854,8 @@ private fun T9KeyboardContent(
 // ─── 九键数字键默认键面（keyboard.t9.keys.<id> 可覆盖） ─────────────────
 
 /** 九键数字键内置键面字母（与历史硬编码一致；keys.<id>.tap.label 可覆盖）。 */
-private val DEFAULT_T9_DIGIT_LETTERS: Map<String, String> = mapOf(
-    "1" to "分词", "2" to "ABC", "3" to "DEF",
+private fun defaultT9DigitLetters(): Map<String, String> = mapOf(
+    "1" to tr(R.string.s_fenci), "2" to "ABC", "3" to "DEF",
     "4" to "GHI", "5" to "JKL", "6" to "MNO",
     "7" to "PQRS", "8" to "TUV", "9" to "WXYZ",
 )
@@ -932,7 +935,7 @@ private fun T9DigitKey(
         onLongPressSelect = { letter -> currentOnLongPressSelect?.invoke(letter) },
         onSwipeStateChange = onSwipeStateChange,
         badgeText = digit,
-        a11yDescription = "数字$digit，字母$letters",
+        a11yDescription = tr(R.string.s_shuzi_zimu, digit, letters),
         swipeText = currentSwipes.swipeUpText,
         swipeDownText = currentSwipes.swipeDownText,
         swipeUpKeyLabel = currentSwipes.swipeUpKeyLabel,
@@ -1035,7 +1038,7 @@ private fun NineKeyButton(
         modifier = modifier,
         onPress = onPress,
         badgeText = digit,
-        a11yDescription = "数字$digit，字母$letters",
+        a11yDescription = tr(R.string.s_shuzi_zimu, digit, letters),
         swipeText = swipes.swipeUpText,
         swipeDownText = swipes.swipeDownText,
         swipeUpKeyLabel = swipes.swipeUpKeyLabel,
@@ -1105,14 +1108,14 @@ private fun ResetKey(
     ) {
         Icon(
             imageVector = Icons.Default.Refresh,
-            contentDescription = "重输",
+            contentDescription = tr(R.string.s_zhongshu),
             tint = textColor,
             modifier = Modifier.size(if (compactMode) 16.dp else 20.dp)
         )
 
         if (!compactMode) {
             Text(
-                text = "重输",
+                text = tr(R.string.s_zhongshu),
                 color = textColor.copy(alpha = 0.5f),
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Normal,
@@ -1193,7 +1196,7 @@ private fun T9SpaceKey(
                         if (!isSttEnabled) return@detectTapGestures
                         view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
                         if (!PermissionHelper.hasRecordAudioPermission(context)) {
-                            Toast.makeText(context, "需要麦克风权限才能使用语音输入", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, tr(R.string.s_xuyaomaikefengquanxiancainengs_3b6e4), Toast.LENGTH_SHORT).show()
                             PermissionHelper.requestRecordAudioPermission(context)
                         } else {
                             currentOnVoiceModeChange?.invoke(true)
@@ -1232,7 +1235,7 @@ private fun T9SpaceKey(
         )
         if (voiceSticky) {
             Text(
-                text = "轻触结束语音",
+                text = tr(R.string.s_qingchujieshuyuyin),
                 color = textColor,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
@@ -1254,7 +1257,7 @@ private fun T9SpaceKey(
             if (isSttEnabled) {
                 Icon(
                     painter = painterResource(R.drawable.voice),
-                    contentDescription = "语音输入",
+                    contentDescription = tr(R.string.s_yuyinshuru),
                     tint = textColor.copy(alpha = 0.3f),
                     modifier = Modifier
                         .size(18.dp)
@@ -1263,7 +1266,7 @@ private fun T9SpaceKey(
                 )
             } else {
                 Text(
-                    text = "空格",
+                    text = stringResource(R.string.keyboard_space),
                     color = textColor.copy(alpha = 0.3f),
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Normal,

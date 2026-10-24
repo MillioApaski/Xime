@@ -1,5 +1,9 @@
 package com.kingzcheung.xime.settings
 
+import com.kingzcheung.xime.R
+
+import com.kingzcheung.xime.i18n.tr
+
 import android.content.Context
 import android.net.Uri
 import android.os.PowerManager
@@ -243,13 +247,13 @@ object SchemaManager {
             val dir = getMarketDir(context, packageId)
             if (!dir.exists() || dir.listFiles()?.none { it.isFile } != false) {
                 FileLogger.w(TAG, "installPackageFromMarketDir: dir not found or empty: $dir")
-                return@withContext InstallFromDirResult(success = false, failureReason = "压缩包不存在")
+                return@withContext InstallFromDirResult(success = false, failureReason = tr(R.string.s_yasuobaobucunzai))
             }
 
             val targetFiles = listInstallTargetFiles(context, packageId)
             if (targetFiles.isEmpty()) {
                 FileLogger.w(TAG, "installPackageFromMarketDir: no target files in $packageId")
-                return@withContext InstallFromDirResult(success = false, failureReason = "归档中没有文件")
+                return@withContext InstallFromDirResult(success = false, failureReason = tr(R.string.s_guidangzhongmeiyouwenjian))
             }
             FileLogger.i(TAG, "installPackageFromMarketDir: found ${targetFiles.size} target files for $packageId")
 
@@ -268,7 +272,7 @@ object SchemaManager {
             val ok = installFromMarketToRime(context, packageId)
             if (!ok) {
                 FileLogger.e(TAG, "installPackageFromMarketDir: installFromMarketToRime returned false")
-                return@withContext InstallFromDirResult(success = false, failureReason = "安装失败")
+                return@withContext InstallFromDirResult(success = false, failureReason = tr(R.string.s_anzhuangshibai))
             }
 
             val after = discoverSchemas(context).map { it.schemaId }.toSet()
@@ -282,7 +286,7 @@ object SchemaManager {
                 .toSet()
             val failedIds = targetSchemaIds - after
             val parseFailures = if (failedIds.isEmpty()) emptyList()
-                else failedIds.map { "$it.schema.yaml 解析失败" }
+                else failedIds.map { tr(R.string.s_schema_yaml_jiexishibai, it) }
             if (parseFailures.isNotEmpty()) {
                 FileLogger.w(TAG, "installPackageFromMarketDir: some schemas failed to parse: $parseFailures")
             }
@@ -327,7 +331,7 @@ object SchemaManager {
             InstallFromDirResult(success = true, newSchemaIds = newIds, unresolvedDeps = unresolved, parseFailures = parseFailures)
         } catch (e: Exception) {
             FileLogger.e(TAG, "installPackageFromMarketDir: UNCAUGHT exception for $packageId", e)
-            return@withContext InstallFromDirResult(success = false, failureReason = "安装异常: ${e.message}")
+            return@withContext InstallFromDirResult(success = false, failureReason = tr(R.string.s_anzhuangyichang, e.message))
         }
     }
 
@@ -585,12 +589,12 @@ object SchemaManager {
         val issues = mutableListOf<String>()
         val schemaFile = File(getRimeDir(context), "$schemaId.schema.yaml")
         if (!schemaFile.exists()) {
-            issues.add("缺少 .schema.yaml 文件")
+            issues.add(tr(R.string.s_queshao_schema_yaml_wenjian))
             return issues
         }
         val dictName = getReferencedDictName(context, schemaId) ?: schemaId
         if (!File(getRimeDir(context), "$dictName.dict.yaml").exists()) {
-            issues.add("缺少 $dictName.dict.yaml 词典文件，无法编译")
+            issues.add(tr(R.string.s_queshao_dict_yaml_cidianwenjia_e4311, dictName))
         }
         return issues
     }

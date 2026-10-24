@@ -1,5 +1,9 @@
 package com.kingzcheung.xime.settings
 
+import com.kingzcheung.xime.R
+
+import com.kingzcheung.xime.i18n.tr
+
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
@@ -65,7 +69,7 @@ object BackupManager {
             null
         } else {
             Log.w(TAG, "Backup: 引擎未就绪，使用现有自造词快照（可能非最新）")
-            "（自造词快照未刷新：需先唤起键盘一次）"
+            tr(R.string.s_zizaocikuaizhaoweishuaxin_xuxi_b6784)
         }
 
         // 流式打包到 cacheDir：包体不驻留内存（含方案词典与插件包时可达数十 MB）
@@ -101,7 +105,7 @@ object BackupManager {
      */
     suspend fun restore(context: Context, plugin: BackupPlugin, id: String): Result<Unit> {
         val download = plugin.pullBackup(id)
-            ?: return Result.failure(Exception("下载备份包失败"))
+            ?: return Result.failure(Exception(tr(R.string.s_xiazaibeifenbaoshibai)))
         return try {
             restoreFromArchive(context, download.file)
         } finally {
@@ -120,10 +124,10 @@ object BackupManager {
         return try {
             context.contentResolver.openInputStream(uri)?.use { input ->
                 temp.outputStream().use { output -> input.copyTo(output) }
-            } ?: return Result.failure(Exception("无法读取所选文件"))
+            } ?: return Result.failure(Exception(tr(R.string.s_wufaduqusuoxuanwenjian)))
             if (!isBackupPackage(temp)) {
                 return Result.failure(
-                    IllegalArgumentException("这不是完整方案包（缺少 ${META_PREFIX} 元数据）；词条快照请用「导入快照」")
+                    IllegalArgumentException(tr(R.string.s_zhebushiwanzhengfanganbao_ques_352a8, META_PREFIX))
                 )
             }
             restoreFromArchive(context, temp)
@@ -315,13 +319,13 @@ object BackupManager {
                     // 显式拒绝绝对路径（File(parent, "/abs") 在 Unix 下会被拼接为 parent/abs，
                     // canonical 检查拦不住；此处按契约直接拒绝）
                     if (File(name).isAbsolute) {
-                        return Result.failure(Exception("备份包包含非法路径: $name"))
+                        return Result.failure(Exception(tr(R.string.s_beifenbaobaohanfeifalujing, name)))
                     }
                     val canonicalRoot = rimeDir.canonicalPath + File.separator
                     if (target.canonicalPath != canonicalRoot.removeSuffix(File.separator) &&
                         !target.canonicalPath.startsWith(canonicalRoot)
                     ) {
-                        return Result.failure(Exception("备份包包含非法路径: $name"))
+                        return Result.failure(Exception(tr(R.string.s_beifenbaobaohanfeifalujing, name)))
                     }
                     // 词库**只合并不覆盖**：包内若带 leveldb 用户词典（旧版本打的包会带），
                     // 落盘就是整库覆盖，本机新打的词当场消失。词库统一由
@@ -373,7 +377,7 @@ object BackupManager {
         if (File(target.name).isAbsolute ||
             !(target.canonicalPath + File.separator).startsWith(canonicalBase)
         ) {
-            throw SecurityException("备份包包含非法路径: ${target.name}")
+            throw SecurityException(tr(R.string.s_beifenbaobaohanfeifalujing, target.name))
         }
         target.parentFile?.mkdirs()
         target.writeBytes(data)
