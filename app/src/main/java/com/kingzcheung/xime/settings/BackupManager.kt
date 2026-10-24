@@ -196,9 +196,12 @@ object BackupManager {
                     SettingsPreferences.setPendingDictMerge(context, true)
                 }
         }
-        // default.custom.yaml 已随包恢复（启用方案列表）：重新镜像进 default.yaml。
-        // default.yaml 本身不进包（派生基座），避免恢复时把旧版本基座一起盖回来。
+        // default.custom.yaml 已随包恢复。旧格式包内含 app 托管的 schema_list：
+        // 强制迁移一次（列表进 prefs、从文件剥离；新格式文件无块则为无操作），
+        // 再从 prefs 镜像进 default.yaml。default.yaml 本身不进包（派生基座），
+        // 避免恢复时把旧版本基座一起盖回来。
         try {
+            SchemaManager.migrateDefaultCustomSchemaList(context, force = true)
             SchemaManager.applyEnabledSchemasToDefaultYaml(context)
         } catch (e: Exception) {
             Log.e(TAG, "Restore: 重新镜像 schema_list 失败", e)

@@ -12,6 +12,10 @@ object SettingsPreferences {
     private const val KEY_CURRENT_SCHEMA_DUAL = "current_schema_dual"
     private const val KEY_DEPLOYMENT_DONE = "deployment_done"
     private const val KEY_BUILTIN_SCHEMAS_MERGED = "builtin_schemas_merged"
+    /** 启用方案列表（有序，逗号连接；schema id 为 [a-z0-9_] 无逗号），持久真相。 */
+    private const val KEY_ENABLED_SCHEMAS = "enabled_schemas"
+    /** default.custom.yaml 的 schema_list 是否已迁移进 prefs（一次性）。 */
+    private const val KEY_DEFAULT_CUSTOM_MIGRATED = "default_custom_schema_list_migrated"
     private const val KEY_PENDING_DICT_MERGE = "pending_dict_merge"
     private const val KEY_DEPLOYMENT_HASH = "deployment_hash"
     private const val KEY_RIME_ASSETS_VERSION = "rime_assets_version"
@@ -220,6 +224,28 @@ object SettingsPreferences {
 
     fun setBuiltinSchemasMerged(context: Context, merged: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_BUILTIN_SCHEMAS_MERGED, merged).apply()
+    }
+
+    /**
+     * 启用方案列表持久层：null 表示从未写入（全新安装/迁移前），此时由
+     * SchemaManager 以内置方案集做种子；空列表是有效状态（用户删空了方案）。
+     */
+    fun getEnabledSchemaList(context: Context): List<String>? {
+        if (!getPrefs(context).contains(KEY_ENABLED_SCHEMAS)) return null
+        return getPrefs(context).getString(KEY_ENABLED_SCHEMAS, "")
+            ?.split(',')?.filter { it.isNotEmpty() }
+    }
+
+    fun setEnabledSchemaList(context: Context, schemas: List<String>) {
+        getPrefs(context).edit().putString(KEY_ENABLED_SCHEMAS, schemas.joinToString(",")).apply()
+    }
+
+    fun isDefaultCustomMigrated(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_DEFAULT_CUSTOM_MIGRATED, false)
+    }
+
+    fun setDefaultCustomMigrated(context: Context, migrated: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_DEFAULT_CUSTOM_MIGRATED, migrated).apply()
     }
 
     /**
