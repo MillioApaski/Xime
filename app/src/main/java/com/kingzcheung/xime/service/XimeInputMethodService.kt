@@ -2576,6 +2576,11 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        // sysNight 来自系统新配置，resNight 是 service 实际读到的值；深浅色跟随失效时两者会不一致
+        val sysNight = newConfig.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        val resNight =
+            resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        FileLogger.i(TAG, "onConfigurationChanged: sysNight=$sysNight resNight=$resNight darkMode=${uiState.value.darkMode}")
         val localeChanged = newConfig.locales != lastLocales
         lastLocales = newConfig.locales
         hasHardwareKeyboard = SettingsPreferences.isHardwareKeyboardDetectionEnabled(this) &&
@@ -2590,7 +2595,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
         updateCursorUpdateMonitoring()
         if (localeChanged) {
             // 系统语言变化：刷新全局取词并重建键盘，Compose 才能取到新语言资源
-            com.kingzcheung.xime.i18n.UiText.init(AppLocale.wrap(this, newConfig))
+            com.kingzcheung.xime.i18n.UiText.init(AppLocale.wrap(this))
             if (isInputViewShown) setInputView(onCreateInputView())
         }
     }
