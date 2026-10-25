@@ -17,4 +17,13 @@ class AppLocaleTest {
             assertEquals(tag, AppLocale.normalize(Locale.forLanguageTag(tag)).toLanguageTag())
         }
     }
+
+    @Test
+    fun `override 配置仅携带 locale，不固化 uiMode 等系统字段`() {
+        val cfg = AppLocale.localeOverrideConfig()
+        assertEquals("uiMode 被 override 固化会导致深浅色不跟随系统", 0, cfg.uiMode)
+        assertEquals("屏幕尺寸被 override 固化会导致旋转/折叠后尺寸过期", 0, cfg.screenWidthDp)
+        assertEquals(0, cfg.screenHeightDp)
+        assertEquals(0f, cfg.fontScale)
+    }
 }
