@@ -46,9 +46,9 @@ object AppLocale {
     fun wrap(base: Context): Context =
         ContextWrapper(base.createConfigurationContext(localeOverrideConfig()))
 
-    internal fun localeOverrideConfig(): Configuration {
+    internal fun localeOverrideConfig(locales: LocaleList = currentLocales()): Configuration {
         val cfg = Configuration()
-        cfg.setLocales(currentLocales())
+        cfg.setLocales(locales)
         return cfg
     }
 
