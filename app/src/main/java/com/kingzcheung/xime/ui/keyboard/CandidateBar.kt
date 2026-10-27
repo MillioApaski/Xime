@@ -99,6 +99,8 @@ data class CandidateBarVisuals(
     val accentColor: Color = Color(0xFF1A73E8),
     val selectedTextColor: Color = Color(0xFF1A73E8),
     val isDarkTheme: Boolean = false,
+    /** 按键底色：深色下圆形图标按钮与按键同材质（半透明白叠在键盘背景上）。 */
+    val keyBgColor: Color = Color.Unspecified,
 )
 
 data class CandidateBarCallbacks(
@@ -143,13 +145,18 @@ fun CandidateBar(
     val horizontalPadding = 8.dp
     val context = LocalContext.current
 
-    // M3 角色色：图标按钮背景用 surface 与 primary 的混合色调（带种子色但不过于强烈），
-    // 按压态用 onSurface 12% state layer
-    val iconButtonContainer = androidx.compose.ui.graphics.lerp(
-        MaterialTheme.colorScheme.surface,
-        MaterialTheme.colorScheme.primary,
-        0.15f
-    )
+    // 圆形图标按钮底色（logo / 返回 / 收起）：深色下与按键同材质——按键就是半透明白叠在
+    // 键盘背景上；若仍用 surface 与 primary 混色，surface 在深色下只有 6% 亮度，混出的圆底
+    // 与键盘背景几乎同色，圆底等于不存在。亮色下按键是纯白，图标按钮改用混合色更耐看。
+    val iconButtonContainer = if (visuals.isDarkTheme && visuals.keyBgColor != Color.Unspecified) {
+        visuals.keyBgColor
+    } else {
+        androidx.compose.ui.graphics.lerp(
+            MaterialTheme.colorScheme.surface,
+            MaterialTheme.colorScheme.primary,
+            0.15f
+        )
+    }
     val iconButtonTint = MaterialTheme.colorScheme.onSurfaceVariant
     val showComments = SettingsPreferences.showCandidateComments(context)
     val inputTextLocation = SettingsPreferences.getInputTextLocation(context)
@@ -292,7 +299,7 @@ fun CandidateBar(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .height(44.dp)
+            .height(IconButtonRowHeight)
             .drawPreeditBubble(
                 text = preeditBubbleText,
                 caretOffset = preeditBubbleCaret,
@@ -367,7 +374,7 @@ fun CandidateBar(
                         if (page is KeyboardPage.Overlay && page.route is OverlayRoute.SchemaList && callbacks.onBack != null) {
                             Box(
                                 modifier = Modifier
-                                    .size(32.dp)
+                                    .size(IconButtonSize)
                                     .clip(CircleShape)
                                     .background(iconButtonContainer)
                                     .clickable { callbacks.onBack() },
@@ -377,13 +384,13 @@ fun CandidateBar(
                                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                                     contentDescription = tr(R.string.s_fanhuicaidan),
                                     tint = visuals.accentColor,
-                                    modifier = Modifier.size(24.dp)
+                                    modifier = Modifier.size(IconButtonGlyphSize)
                                 )
                             }
                         } else {
                             Box(
                                 modifier = Modifier
-                                    .size(32.dp)
+                                    .size(IconButtonSize)
                                     .clip(CircleShape)
                                     .background(iconButtonContainer)
                                     .clickable { callbacks.onLogoClick?.invoke() },
@@ -393,7 +400,7 @@ fun CandidateBar(
                                     painter = painterResource(id = if (visuals.isDarkTheme) R.drawable.logo_dark else R.drawable.logo),
                                     contentDescription = tr(R.string.s_xima_logo),
                                     tint = Color.Unspecified,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(IconButtonGlyphSize)
                                 )
                             }
                         }
@@ -557,7 +564,7 @@ fun CandidateBar(
                                     Box(
                                         modifier = Modifier
                                             .padding(horizontal = 5.dp)
-                                            .size(32.dp)
+                                            .size(IconButtonSize)
                                             // 工具栏在 horizontalScroll 内：用 tolerantClick 容忍轻点的小位移，
                                             // 避免 ROM 手势判定吃掉点击（与候选条目同因）
                                             .tolerantClick(
@@ -570,7 +577,7 @@ fun CandidateBar(
                                         ToolbarButtonIcon(
                                             item = action.item,
                                             tint = if (isPressed) iconButtonTint.copy(alpha = 0.6f) else iconButtonTint,
-                                            modifier = Modifier.size(22.dp),
+                                            modifier = Modifier.size(IconButtonGlyphSize),
                                         )
                                     }
                                 }
@@ -586,7 +593,7 @@ fun CandidateBar(
 
                         Box(
                             modifier = Modifier
-                                .size(32.dp)
+                                .size(IconButtonSize)
                                 .clickable(
                                     interactionSource = hideKeyboardInteractionSource,
                                     indication = null,
@@ -598,7 +605,7 @@ fun CandidateBar(
                                 imageVector = Icons.Default.KeyboardArrowDown,
                                 contentDescription = tr(R.string.s_shouqijianpan),
                                 tint = if (isHideKeyboardPressed) iconButtonTint.copy(alpha = 0.6f) else iconButtonTint,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(IconButtonGlyphSize)
                             )
                         }
                     }
@@ -607,7 +614,7 @@ fun CandidateBar(
                     if (callbacks.onBack != null) {
                         Box(
                             modifier = Modifier
-                                .size(28.dp)
+                                .size(IconButtonSize)
                                 .clip(CircleShape)
                                 .background(iconButtonContainer)
                                 .clickable { callbacks.onBack() },
@@ -617,7 +624,7 @@ fun CandidateBar(
                                 imageVector = Icons.Default.KeyboardArrowUp,
                                 contentDescription = tr(R.string.s_fanhuijianpan),
                                 tint = visuals.accentColor,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(IconButtonGlyphSize)
                             )
                         }
                     }
