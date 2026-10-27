@@ -837,21 +837,24 @@ object KeysConfigHelper {
     fun getButtonLayout(isAsciiMode: Boolean): ButtonLayout =
         resolveButtonLayout(isAsciiMode, _activeMergedSection, _buttonLayoutBySection, _buttonLayoutZh, _buttonLayoutEn)
 
-    // 键盘行布局默认值
+    // 键盘行布局默认值：3 字母行（第三行两端功能键与控制行分离，与 xime.yaml 同行结构），
+    // 控制行由 normalizeQwertyRows 补齐。第三行必须带 shift/delete：
+    // 首帧早于配置装载时就是靠这份兜底布局，缺键会表现为「shift/退格不显示」。
     private val DEFAULT_ZH_ROWS: List<List<String>> = listOf(
         listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p"),
         listOf("a", "s", "d", "f", "g", "h", "j", "k", "l"),
-        listOf("z", "x", "c", "v", "b", "n", "m"),
+        listOf("shift", "z", "x", "c", "v", "b", "n", "m", "delete"),
     )
     private val DEFAULT_EN_ROWS: List<List<String>> = listOf(
         listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p"),
         listOf("a", "s", "d", "f", "g", "h", "j", "k", "l"),
-        listOf("z", "x", "c", "v", "b", "n", "m"),
+        listOf("shift", "z", "x", "c", "v", "b", "n", "m", "delete"),
     )
 
-    // 键盘行布局缓存（中文 / 英文）
-    private var _zhLayout: KeyboardRowsLayout = KeyboardRowsLayout(DEFAULT_ZH_ROWS.map { KeyboardRow(it) })
-    private var _enLayout: KeyboardRowsLayout = KeyboardRowsLayout(DEFAULT_EN_ROWS.map { KeyboardRow(it) })
+    // 键盘行布局缓存（中文 / 英文）：用 Compose 状态，配置晚于首帧就绪时自动触发重组
+    // （普通字段做不到——首帧画完兜底布局后没人通知重画，直到按一次键才更新）
+    private val _zhLayout = mutableStateOf(KeyboardRowsLayout(DEFAULT_ZH_ROWS.map { KeyboardRow(it) }))
+    private val _enLayout = mutableStateOf(KeyboardRowsLayout(DEFAULT_EN_ROWS.map { KeyboardRow(it) }))
 
     // 标准 26 键的基线缓存（合并键布局切换退出时恢复）
     private var _zhLayoutBase: KeyboardRowsLayout = KeyboardRowsLayout(DEFAULT_ZH_ROWS.map { KeyboardRow(it) })
@@ -967,11 +970,11 @@ object KeysConfigHelper {
         if (merged == _activeMergedSection && t9 == _activeT9Section && stroke == _activeStrokeSection) return
         _activeMergedSection = merged
         if (merged != null) {
-            _zhLayout = _mergedLayouts[merged]
+            _zhLayout.value = _mergedLayouts[merged]
                 ?: KeyboardRowsLayout(DEFAULT_ZH_ROWS.map { KeyboardRow(it) })
             _keyGestureConfig.value = _mergedGestureConfigs[merged] ?: emptyMap()
         } else {
-            _zhLayout = _zhLayoutBase
+            _zhLayout.value = _zhLayoutBase
             _keyGestureConfig.value = _keyGestureConfigZhBase
         }
         // 代码布局按段切换：type 声明的任意段名可并存多份九键/笔画配置，激活哪个段就换入哪份
@@ -991,9 +994,10 @@ object KeysConfigHelper {
      * 获取键盘行布局：行声明（含行级 align/width）+ 参考列数 + 键盘级对齐策略。
      * 每个 [KeyboardRow] 的 keys 为一行的按键 ID 列表，索引 0 = 第一行；
      * 合并键布局中合并键的 ID 为组内字母拼接（如 "qw"），渲染层按 ID 长度分配键宽。
+     * 读取的是 Compose 状态：配置就绪后调用方所在组合作用域会自动重组。
      */
     fun getRowsLayout(isAsciiMode: Boolean): KeyboardRowsLayout =
-        if (isAsciiMode) _enLayout else _zhLayout
+        if (isAsciiMode) _enLayout.value else _zhLayout.value
     
     /** 配置版本号，每次 loadConfig 时递增，用于 Compose 感知配置变更。 */
     private val _configVersion = MutableStateFlow(0)
@@ -1085,7 +1089,7 @@ object KeysConfigHelper {
             // 键盘行布局
             val parsedRows = parseKeyboardLayoutFromAssets(context)
             _zhLayoutBase = parsedRows.zhLayout
-            _enLayout = parsedRows.enLayout
+            _enLayout.value = parsedRows.enLayout
             // 合并键绑定（keyboard.<section>.schemas，custom 覆盖 builtIn 同名方案的绑定）
             // 内置/自定义两份 YAML 文本只读一次，后面几处复用（面板段装载也用同一份）
             val builtInText = readAssetText(context, XIME_CONFIG_FILE)
@@ -1160,7 +1164,7 @@ object KeysConfigHelper {
             // setActiveKeyboardSchema 覆盖。不能只依赖 setActiveKeyboardSchema：
             // 非合并键方案 section 为 null，与刚重置的 _activeMergedSection(null) 相等
             // 会被提前 return，导致 xime.custom.yaml 的行布局/手势不生效（重新部署也无效）。
-            _zhLayout = _zhLayoutBase
+            _zhLayout.value = _zhLayoutBase
             _keyGestureConfig.value = _keyGestureConfigZhBase
             // 重新应用当前方案对应的合并键布局（上面重置了基线缓存）
             _activeMergedSection = null
