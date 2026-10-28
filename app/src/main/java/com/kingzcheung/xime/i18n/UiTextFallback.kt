@@ -189,7 +189,7 @@ internal object UiTextFallback {
         R.string.s_anzhuangshibai_2 to "安装失败：%1\$s",
         R.string.s_wufahuoqubujuliebiao_yichangsh_4e00d to "无法获取布局列表（已尝试 %1\$s 个镜像）",
         R.string.s_queshao_sha256_xiaoyanzhi to "缺少 sha256 校验值",
-        R.string.s_jieyashibaihuobaoneirongbuhefa_05019 to "解压失败或包内容不合法（需根级 xime.custom.yaml）",
+        R.string.s_jieyashibaihuobaoneirongbuhefa_05019 to "包内容不合法（xime.custom.yaml 为空或 YAML 无法解析，或没有可安装文件）",
         R.string.s_wenjianxiaoyanshibai_sha256_bu_e9d3c to "文件校验失败（sha256 不匹配），文件可能不完整",
         R.string.s_yasuobaobucunzai_qingxianxiazai to "压缩包不存在，请先下载",
         R.string.s_lixian to "%1\$s（离线）",
