@@ -202,7 +202,12 @@ object BackupManager {
         // 避免恢复时把旧版本基座一起盖回来。
         try {
             SchemaManager.migrateDefaultCustomSchemaList(context, force = true)
-            SchemaManager.applyEnabledSchemasToDefaultYaml(context)
+            // 备份可能来自旧版本（没有 active_package_id）或另一台设备
+            //（活动包 id 对应的包不存在）：强制按恢复后的实际文件/current 重新推断。
+            ActivePackageResolver.migrateIfNeeded(context, force = true)
+            if (!SchemePackageState.reconcile(context)) {
+                SchemaManager.applyEnabledSchemasToDefaultYaml(context)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Restore: 重新镜像 schema_list 失败", e)
         }

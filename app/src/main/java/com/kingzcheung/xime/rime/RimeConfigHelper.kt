@@ -4,7 +4,9 @@ import com.kingzcheung.xime.util.FileLogger
 import android.content.Context
 import android.util.Log
 import com.kingzcheung.xime.BuildConfig
+import com.kingzcheung.xime.settings.ActivePackageResolver
 import com.kingzcheung.xime.settings.PersonalDictManager
+import com.kingzcheung.xime.settings.SchemePackageState
 import com.kingzcheung.xime.settings.SchemaConfigHelper
 import com.kingzcheung.xime.settings.SchemaManifestManager
 import com.kingzcheung.xime.settings.MarketVersionStore
@@ -48,8 +50,13 @@ object RimeConfigHelper {
         }
         
         copyAssetsToRimeDir(context, rimeDir)
-        // F1: assets 会用内置 default.yaml 覆盖，这里把启用方案重新写回 schema_list
-        SchemaManager.applyEnabledSchemasToDefaultYaml(context)
+        // 升级兼容：旧 prefs 没有 active_package_id，这里只读推断并写一个键，
+        // 不改 enabled/current，不删文件；失败下次重试。
+        ActivePackageResolver.migrateIfNeeded(context)
+        // 按活动包收敛启用列表；无法收敛（无活动包/包不可用）时保持旧逻辑。
+        if (!SchemePackageState.reconcile(context)) {
+            SchemaManager.applyEnabledSchemasToDefaultYaml(context)
+        }
         // 为所有启用方案打个人词库补丁
         PersonalDictManager.ensureSchemaPacks(context)
         // 不再在初始化阶段删 build：build 是否重建统一由 ensureDeployment()
@@ -73,9 +80,19 @@ object RimeConfigHelper {
             // 刚补回基础文件：旧 hash 与产物已不可信，强制重编
             if (ensureBuiltinBaseFiles(context) > 0) SettingsPreferences.setDeploymentHash(context, "")
             val currentHash = computeDeploymentHash(context)
-            if (currentHash.isNotEmpty() && currentHash == SettingsPreferences.getDeploymentHash(context)) {
+            // hash 一致不代表产物齐全：librime 部署失败只记日志、不改变返回码，
+            // 旧逻辑因此会把「部分方案未编译」当成已部署永久跳过。这里要求产物
+            // 也齐全，缺失时继续走维护流程重编。
+            val missing = missingCompiledSchemas(context)
+            if (currentHash.isNotEmpty() &&
+                currentHash == SettingsPreferences.getDeploymentHash(context) &&
+                missing.isEmpty()
+            ) {
                 SettingsPreferences.setDeploymentDone(context, true)
                 return true
+            }
+            if (missing.isNotEmpty()) {
+                FileLogger.w(TAG, "Missing build artifacts for enabled schemas: ${missing.joinToString()}")
             }
             Log.i(TAG, "Deployment hash mismatch or missing")
             val buildDir = File(context.filesDir, "rime/build")
@@ -101,12 +118,52 @@ object RimeConfigHelper {
             }
             if (deployed) {
                 storeDeploymentHash(context)
-                SettingsPreferences.setDeploymentDone(context, true)
+                val stillMissing = missingCompiledSchemas(context)
+                SettingsPreferences.setDeploymentDone(context, stillMissing.isEmpty())
+                if (stillMissing.isNotEmpty()) {
+                    FileLogger.e(
+                        TAG,
+                        "Deployment finished but schemas are not compiled: ${stillMissing.joinToString()}"
+                    )
+                    return false
+                }
                 return true
             }
             return false
         }
     }
+
+    /**
+     * 已启用但缺少编译产物（build/<id>.prism.bin 或 build/<id>.schema.yaml）的方案。
+     * librime 部署失败只写日志、部署任务本身仍返回成功，必须由宿主自行校验，
+     * 否则「部署完成」会掩盖方案未编译（如 t9_pinyin 不在 schema_list 里）。
+     */
+    fun missingCompiledSchemas(context: Context): List<String> {
+        val rimeDir = File(context.filesDir, "rime")
+        // 只看源码还在的启用方案：源码已被卸载的残留项重编也补不出产物，
+        // 不应因此让每次启动都触发一次维护。
+        val enabled = SchemaManager.getEnabledSchemas(context)
+            .filter { File(rimeDir, "$it.schema.yaml").isFile }
+        return missingCompiledSchemas(
+            enabled = enabled,
+            buildDir = File(rimeDir, "build"),
+        )
+    }
+
+    /** 纯文件校验（可单测）：启用方案是否都有至少一个编译产物。 */
+    internal fun missingCompiledSchemas(
+        enabled: List<String>,
+        buildDir: File,
+    ): List<String> = enabled.filter { schemaId ->
+        !File(buildDir, "$schemaId.prism.bin").exists() &&
+            !File(buildDir, "$schemaId.schema.yaml").exists()
+    }
+
+    /** [missingCompiledSchemas] 的显示名版本，用于部署失败提示。 */
+    fun missingCompiledSchemaNames(context: Context): List<String> =
+        missingCompiledSchemas(context).map { schemaId ->
+            SchemaManager.getSchemaDisplayName(context, schemaId) ?: schemaId
+        }
     
     fun initializeRimeData(context: Context): Pair<String, String> {
         val rimeDir = File(context.filesDir, "rime")
@@ -118,8 +175,12 @@ object RimeConfigHelper {
         }
         
         copyAssetsToRimeDir(context, rimeDir)
-        // F1: 同步初始化路径也写回 default.yaml 的 schema_list
-        SchemaManager.applyEnabledSchemasToDefaultYaml(context)
+        // 升级兼容：同步初始化路径同样只推断并落盘 active_package_id
+        ActivePackageResolver.migrateIfNeeded(context)
+        // 同步初始化路径也按活动包收敛；失败则保持旧逻辑写回 schema_list
+        if (!SchemePackageState.reconcile(context)) {
+            SchemaManager.applyEnabledSchemasToDefaultYaml(context)
+        }
         runBlocking { PersonalDictManager.ensureSchemaPacks(context) }
         // build 重建统一由 ensureDeployment() 增量优先决策，此处不删 build
         
@@ -189,6 +250,9 @@ object RimeConfigHelper {
         }
 
         for (schemaId in enabledSchemas) {
+            // 源文件已被卸载的残留启用项不参与部署（applyEnabledSchemasToDefaultYaml
+            // 也会跳过），不能因为它把整次部署判成未完成。
+            if (!File(rimeDir, "$schemaId.schema.yaml").isFile) continue
             if (!File(buildDir, "$schemaId.prism.bin").exists() &&
                 !File(buildDir, "$schemaId.schema.yaml").exists()) {
                 return false
@@ -421,15 +485,17 @@ object RimeConfigHelper {
     /** 安装/导入后自动部署（补基线 → 词库补丁 → 增量部署，产物不完整再全量重编）。需在后台线程调用。 */
     fun deployInstalledSchema(context: Context): Boolean {
         ensureBuiltinBaseFiles(context)
-        // 刚卸载过冲突方案时 schema_list 可能还指着已删方案，会让维护中断
-        SchemaManager.applyEnabledSchemasToDefaultYaml(context)
+        // 安装完成后按新活动包收敛；失败时退回旧的 schema_list 镜像。
+        if (!SchemePackageState.reconcile(context)) {
+            SchemaManager.applyEnabledSchemasToDefaultYaml(context)
+        }
         runBlocking { PersonalDictManager.ensureSchemaPacks(context) }
         if (ensureDeployment(context) && isDeploymentComplete(context)) return true
-        // 产物不完整：清 hash 后全量重编一次
+        // 产物不完整：清 hash 后全量重编一次；仍然缺产物就如实返回失败
         SettingsPreferences.setDeploymentHash(context, "")
         val deployed = RimeEngine.getInstance().deploy()
         if (deployed) storeDeploymentHash(context)
-        return deployed
+        return deployed && isDeploymentComplete(context)
     }
 
     /**

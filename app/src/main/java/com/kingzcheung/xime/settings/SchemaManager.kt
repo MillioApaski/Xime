@@ -74,6 +74,9 @@ internal data class SchemaEntry(
 object SchemaManager {
     private const val TAG = "SchemaManager"
     private const val CUSTOM_YAML = "default.custom.yaml"
+    private const val DEFAULT_YAML = "default.yaml"
+    /** 方案包 default.yaml 的读取上限（防止异常归档把整文件读进内存）。 */
+    private const val MAX_PACKAGED_DEFAULT_YAML = 1_048_576L
     internal val yaml = Yaml(configuration = YamlConfiguration(strictMode = false, anchorsAndAliases = com.charleskorn.kaml.AnchorsAndAliases.Permitted(maxAliasCount = UInt.MAX_VALUE)))
 
     private val downloadClient = OkHttpClient.Builder()
@@ -318,16 +321,39 @@ object SchemaManager {
                 SettingsPreferences.addInstalledMarketId(context, packageId)
             }
 
-            // 至少启用一个新方案，避免 RimeEngine 因 schema_list 为空而挂起。
+            // 安装/切换方案包：启用列表 = 该包实际解析成功且在作者 schema_list 里的方案。
+            // 不能只取 firstSchema（内置包会漏掉 t9_pinyin）；也不能启用包内所有
+            // *.schema.yaml（白霜包还带注音/仓颉等辅助方案，缺 zhuyin 资源会部署报错）；
+            // 更不能追加旧列表（切到白霜后仍启用 wubi86/t9_pinyin，部署 missing input schema）。
             // 更新已安装方案时（switchEnabled=false）不强制切换启用列表，保留用户现有方案。
-            val firstSchema = newIds.firstOrNull()
+            val parsedPackageSchemas = (targetSchemaIds.filter { it in after } + newIds).distinct()
+            val firstSchema = parsedPackageSchemas.firstOrNull()
                 ?: targetFiles.firstOrNull { it.endsWith(".schema.yaml") }
                     ?.removeSuffix(".schema.yaml")
-            if (firstSchema != null && switchEnabled) {
-                setEnabledSchemas(context, listOf(firstSchema))
+            val packagedSchemaIds = if (switchEnabled) {
+                readPackagedSchemaList(context, packageId)?.filter { it in after }
+            } else null
+            val enabledSchemas = when {
+                !switchEnabled -> emptyList()
+                packageId == SchemaManifestManager.BUILTIN_PACKAGE_ID ->
+                    BUILTIN_SCHEMAS.filter { it in after }.ifEmpty { parsedPackageSchemas }
+                !packagedSchemaIds.isNullOrEmpty() -> packagedSchemaIds
+                else -> listOfNotNull(firstSchema)
+            }
+            if (enabledSchemas.isNotEmpty()) {
+                setEnabledSchemas(context, enabledSchemas)
+            }
+            // 安装即激活：单包模型下活动包必须跟着安装结果走，
+            // 否则升级迁移写入的 active 会停留在旧的 builtin 上。
+            if (switchEnabled) {
+                SettingsPreferences.setActivePackageId(context, packageId)
             }
 
-            FileLogger.i(TAG, "installPackageFromMarketDir: success for $packageId, firstSchema=$firstSchema")
+            FileLogger.i(
+                TAG,
+                "installPackageFromMarketDir: success for $packageId, " +
+                    "packaged=${packagedSchemaIds?.joinToString()}, enabled=${enabledSchemas.joinToString()}"
+            )
             InstallFromDirResult(success = true, newSchemaIds = newIds, unresolvedDeps = unresolved, parseFailures = parseFailures)
         } catch (e: Exception) {
             FileLogger.e(TAG, "installPackageFromMarketDir: UNCAUGHT exception for $packageId", e)
@@ -428,6 +454,55 @@ object SchemaManager {
         return allOk
     }
 
+    /**
+     * 读取方案包归档里的 default.yaml schema_list（作者声明的开箱启用方案集）。
+     * default.yaml 本身受保护、不会导入，这里只读取用来决定启用列表；没有则返回 null。
+     */
+    internal fun readPackagedSchemaList(context: Context, packageId: String): List<String>? {
+        val dir = getMarketDir(context, packageId)
+        val files = dir.listFiles()?.filter { it.isFile } ?: return null
+        for (file in files) {
+            val text = when {
+                file.name.endsWith(".zip", ignoreCase = true) -> readZipEntryText(file, DEFAULT_YAML)
+                file.name.endsWith(".tar.gz", ignoreCase = true) ||
+                    file.name.endsWith(".tgz", ignoreCase = true) -> readTarEntryText(file, DEFAULT_YAML)
+                file.name == DEFAULT_YAML -> file.takeIf { it.length() in 1..MAX_PACKAGED_DEFAULT_YAML }
+                    ?.readText()
+                else -> null
+            } ?: continue
+            val ids = parseSchemaListBlock(text)
+            if (ids.isNotEmpty()) return ids
+        }
+        return null
+    }
+
+    private fun readZipEntryText(file: File, baseName: String): String? {
+        ZipFile(file).use { zip ->
+            val entry = zip.entries().asSequence().firstOrNull {
+                !it.isDirectory &&
+                    it.name.substringAfterLast('/') == baseName &&
+                    it.size in 1..MAX_PACKAGED_DEFAULT_YAML
+            } ?: return null
+            return zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() }
+        }
+    }
+
+    private fun readTarEntryText(file: File, baseName: String): String? {
+        TarArchiveInputStream(GzipCompressorInputStream(file.inputStream().buffered())).use { tar ->
+            var entry = tar.nextEntry
+            while (entry != null) {
+                if (!entry.isDirectory &&
+                    entry.name.substringAfterLast('/') == baseName &&
+                    entry.size in 1..MAX_PACKAGED_DEFAULT_YAML
+                ) {
+                    return tar.readBytes().toString(Charsets.UTF_8)
+                }
+                entry = tar.nextEntry
+            }
+        }
+        return null
+    }
+
     internal fun getBuildDir(context: Context): File =
         File(getRimeDir(context), "build")
 
@@ -438,6 +513,33 @@ object SchemaManager {
         val buildDir = getBuildDir(context)
         return File(buildDir, "$schemaId.prism.bin").exists() ||
                File(buildDir, "$schemaId.schema.yaml").exists()
+    }
+
+    /**
+     * 解析 default.yaml 文本里的 schema_list（纯函数）。
+     * 用于读取方案包自带的 default.yaml：它声明了作者希望开箱启用的方案集，
+     * 通常比包里所有 *.schema.yaml 少（例如白霜包还带注音/仓颉等辅助方案，
+     * 全启用会因缺 zhuyin 资源导致部署报错）。
+     */
+    internal fun parseSchemaListBlock(text: String): List<String> {
+        val lines = text.lines()
+        val headerIdx = lines.indexOfFirst { it.trim() == "schema_list:" }
+        if (headerIdx < 0) return emptyList()
+        val ids = mutableListOf<String>()
+        for (i in headerIdx + 1 until lines.size) {
+            val trimmed = lines[i].trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
+            if (!trimmed.startsWith("-")) break
+            val item = trimmed.removePrefix("-").trim()
+            if (!item.startsWith("schema:")) continue
+            val id = item.removePrefix("schema:")
+                .substringBefore("#")
+                .trim()
+                .removeSurrounding("\"")
+                .removeSurrounding("'")
+            if (id.isNotEmpty()) ids.add(id)
+        }
+        return ids
     }
 
     // F1: 把启用方案直接写进 default.yaml 的 schema_list（纯函数，可单测）
@@ -479,8 +581,11 @@ object SchemaManager {
 
     /**
      * F1: 把启用方案写回 `default.yaml` 的 schema_list。
-     * librime 编译以 default.yaml 的真实 schema_list 为准（default.custom.yaml 的
-     * patch 在本项目构建里不作用到词典编译阶段），所以必须直接改 default.yaml。
+     *
+     * librime 的 AutoPatchConfigPlugin 会把 default.custom.yaml 的 patch 叠加到
+     * default.yaml 上（部署编译阶段读取 schema_list 也会叠加），所以这里必须先剥掉
+     * default.custom.yaml 里的 schema_list，否则第三方/内置方案包自带的旧列表会
+     * 覆盖 app 的启用列表，导致未列出的方案（如 t9_pinyin）永不编译。
      *
      * @param schemaIds 缺省取当前启用列表；[setEnabledSchemas] 会显式传入避免重复读取。
      */
@@ -488,17 +593,63 @@ object SchemaManager {
         context: Context,
         schemaIds: List<String> = getEnabledSchemas(context)
     ) {
+        stripSchemaListFromDefaultCustom(context)
         if (schemaIds.isEmpty()) return
-        val defaultYaml = File(getRimeDir(context), "default.yaml")
+        val rimeDir = getRimeDir(context)
+        // 只镜像源文件还在的启用项：卸载方案包/冲突卸载可能留下已删方案的 id，
+        // 写进 schema_list 会让 librime 报 missing input schema 并拖累整次部署。
+        val effective = schemaIds.filter { File(rimeDir, "$it.schema.yaml").isFile }
+        if (effective.size != schemaIds.size) {
+            // 卸载旧方案包后 prefs 里可能还留着它的子方案 id（如切白霜后仍有
+            // wubi86/t9_pinyin）；把这些已无源文件的残留项从启用列表清掉，
+            // 避免每次部署都报 missing input schema。
+            FileLogger.w(
+                TAG,
+                "Drop enabled schemas without source file: " +
+                    (schemaIds - effective.toSet()).joinToString()
+            )
+            if (effective.isNotEmpty()) {
+                SettingsPreferences.setEnabledSchemaList(context, effective)
+            }
+        }
+        if (effective.isEmpty()) return
+        val defaultYaml = File(rimeDir, "default.yaml")
         if (!defaultYaml.exists()) return
         try {
             val text = defaultYaml.readText()
-            val updated = replaceSchemaListBlock(text, schemaIds)
+            val updated = replaceSchemaListBlock(text, effective)
             if (updated != text) {
                 defaultYaml.writeText(updated)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to write default.yaml schema_list", e)
+        }
+    }
+
+    /**
+     * 剥离 default.custom.yaml 里 app 托管的 schema_list 块（其余用户补丁保留）。
+     *
+     * 该块会被 librime 当作 default.yaml 的 patch，覆盖 app 从 prefs 镜像过去的
+     * 启用列表。方案包（含内置「默认方案」包）自带该块时，会让 t9_pinyin 等
+     * 未列出的方案不参与编译；而 default.custom.yaml 属于用户数据，安装时不会被
+     * 冲突检测拦截，只能在这里兜底清理。幂等，无块时不写盘。
+     */
+    fun stripSchemaListFromDefaultCustom(context: Context) {
+        val customFile = getCustomYamlFile(context)
+        if (!customFile.exists()) return
+        try {
+            val text = customFile.readText()
+            val (stripped, schemas) = stripSchemaListBlock(text)
+            if (stripped != text) {
+                customFile.writeText(stripped)
+                FileLogger.w(
+                    TAG,
+                    "Stripped schema_list (${schemas.size} schemas) from default.custom.yaml; " +
+                        "enabled list is managed by prefs"
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to strip schema_list from default.custom.yaml", e)
         }
     }
 
@@ -800,7 +951,13 @@ object SchemaManager {
             setEnabledSchemas(context, BUILTIN_SCHEMAS)
             return BUILTIN_SCHEMAS
         }
-        if (stored.isEmpty()) return BUILTIN_SCHEMAS
+        if (stored.isEmpty()) {
+            // 空列表不是有效选择（方案管理至少保留一个；删空只可能来自卸载最后一个
+            // 方案）：回落到内置集合并写回 prefs/default.yaml，否则 UI 以为内置方案
+            // 已启用、部署却按旧 schema_list 编译，表现为方案缺失/未编译。
+            setEnabledSchemas(context, BUILTIN_SCHEMAS)
+            return BUILTIN_SCHEMAS
+        }
 
         // 内置方案补齐只执行一次（新版本首次运行，治老版本升级残留：
         // 列表无 t9_pinyin → 方案永不部署 → 切九键静默失败）。之后用户
@@ -903,6 +1060,18 @@ object SchemaManager {
     }
 
     suspend fun deleteSchemaFiles(context: Context, schemaId: String): Boolean {
+        // 包清单里可能包含多个子方案（如 builtin 包含 wubi86/t9_pinyin），
+        // 卸载后必须把它们全部从启用列表移除，只删包 id 会留下指向已删文件的残留项。
+        val packageSchemaIds = try {
+            SchemaManifestManager.loadManifest(context, schemaId)
+                ?.optJSONObject("files")
+                ?.keys()?.asSequence()
+                ?.filter { it.endsWith(".schema.yaml") }
+                ?.map { it.removeSuffix(".schema.yaml") }
+                ?.toSet().orEmpty()
+        } catch (_: Exception) {
+            emptySet()
+        }
         // 优先使用清单系统精准卸载
         val result = SchemaManifestManager.uninstallWithManifest(context, schemaId)
         if (result.manifestExisted) {
@@ -923,11 +1092,33 @@ object SchemaManager {
             Log.i(TAG, "Legacy uninstall for $schemaId (dict=$dictName)")
         }
 
-        // 从已安装市场列表和启用列表中移除
+        // 从已安装市场列表、启用列表和该方案自己的偏好里移除
         SettingsPreferences.removeInstalledMarketId(context, schemaId)
+        // 单包模型：卸载当前活动包后先置空；若紧接着安装新包，安装路径会写回新 id。
+        if (SettingsPreferences.getActivePackageId(context) == schemaId) {
+            SettingsPreferences.setActivePackageId(context, null)
+        }
+        val removedSchemaIds = packageSchemaIds + schemaId
+        removedSchemaIds.forEach { SettingsPreferences.removeLayoutPreference(context, it) }
         val enabled = getEnabledSchemas(context).toMutableList()
-        enabled.remove(schemaId)
+        enabled.removeAll(removedSchemaIds)
         setEnabledSchemas(context, enabled)
+
+        // 当前方案若属于被卸载的包，切到剩余启用方案，避免 current_schema/user.yaml
+        // 一直指向已删除的方案；没有可用替代时留给启动兜底。
+        val current = SettingsPreferences.getCurrentSchema(context)
+        if (current in removedSchemaIds) {
+            val rimeDir = getRimeDir(context)
+            val replacement = getEnabledSchemas(context)
+                .firstOrNull { it !in removedSchemaIds && File(rimeDir, "$it.schema.yaml").isFile }
+            if (replacement != null) {
+                SettingsPreferences.setCurrentSchema(context, replacement)
+                FileLogger.i(
+                    TAG,
+                    "Uninstalled current schema '$current', switched current schema to '$replacement'"
+                )
+            }
+        }
         return true
     }
 
