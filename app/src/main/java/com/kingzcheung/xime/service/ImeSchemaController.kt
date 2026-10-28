@@ -80,11 +80,16 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
                 val availableSchemas = service.rimeEngine.getAvailableSchemas()
                 
                 val savedSchema = SettingsPreferences.getCurrentSchema(service)
+                // 部署刚结束，get_schema_list 就是本次部署的结果，直接按它判定。
                 if (savedSchema in availableSchemas) {
                     applyPageSizeSetting(savedSchema)
                     service.rimeEngine.switchSchema(savedSchema)
                 } else {
-                    FileLogger.w(XimeInputMethodService.TAG, "Schema $savedSchema not found in available schemas")
+                    FileLogger.w(
+                        XimeInputMethodService.TAG,
+                        "Schema $savedSchema not in deployed schema_list, " +
+                            "available=${availableSchemas.joinToString()}"
+                    )
                 }
                 
                 // 直接在 key-processing 线程同步读取 name，避免嵌套协程的时序问题
@@ -350,10 +355,6 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
                 service.notifyDeploymentStatus(false, "")
             }
         }
-    }
-    
-    private fun updateKeyboardHeightPreview(heightDp: Int) {
-        service.keyboardContainer.updateHeight(heightDp)
     }
     
     internal fun setKeyboardHeight(heightDp: Int) {
