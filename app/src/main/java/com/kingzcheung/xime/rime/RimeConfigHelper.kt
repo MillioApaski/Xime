@@ -3,17 +3,16 @@ package com.kingzcheung.xime.rime
 import com.kingzcheung.xime.util.FileLogger
 import android.content.Context
 import android.util.Log
-import com.kingzcheung.xime.BuildConfig
-import com.kingzcheung.xime.settings.ActivePackageResolver
 import com.kingzcheung.xime.settings.PersonalDictManager
-import com.kingzcheung.xime.settings.SchemePackageState
 import com.kingzcheung.xime.settings.SchemaConfigHelper
-import com.kingzcheung.xime.settings.SchemaManifestManager
 import com.kingzcheung.xime.settings.MarketVersionStore
-import com.kingzcheung.xime.settings.RimeDependencyResolver
 import com.kingzcheung.xime.settings.SchemaManager
+import com.kingzcheung.xime.scheme.SchemeFiles
+import com.kingzcheung.xime.scheme.SchemeInstaller
+import com.kingzcheung.xime.scheme.SchemeStore
+import com.kingzcheung.xime.settings.RimeDependencyResolver
+import com.kingzcheung.xime.settings.RimeSharedFiles
 import com.kingzcheung.xime.settings.SettingsPreferences
-import com.kingzcheung.xime.settings.SharedPresetOverrides
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -26,7 +25,6 @@ object RimeConfigHelper {
     private const val ASSETS_RIME_DIR = "rime"
     /** app 固定的 default.custom.yaml 模板（assets 根，与 xime.yaml 并列，不随 submodule 分发）。 */
     private const val ASSETS_DEFAULT_CUSTOM = "default.custom.yaml"
-    private const val BUFFER_SIZE = 8192
 
     /** 市场索引中随 app 发布的内置默认方案集条目 id（见 rimes/index.yaml 的 `builtin`）。 */
     private const val BUILTIN_MARKET_ID = "builtin"
@@ -50,13 +48,9 @@ object RimeConfigHelper {
         }
         
         copyAssetsToRimeDir(context, rimeDir)
-        // 升级兼容：旧 prefs 没有 active_package_id，这里只读推断并写一个键，
-        // 不改 enabled/current，不删文件；失败下次重试。
-        ActivePackageResolver.migrateIfNeeded(context)
-        // 按活动包收敛启用列表；无法收敛（无活动包/包不可用）时保持旧逻辑。
-        if (!SchemePackageState.reconcile(context)) {
-            SchemaManager.applyEnabledSchemasToDefaultYaml(context)
-        }
+        // 状态对齐（迁移一次 + 过滤失效项），再把启用列表镜像进 default.yaml。
+        SchemeStore.ensure(context)
+        SchemaManager.applyEnabledSchemasToDefaultYaml(context)
         // 为所有启用方案打个人词库补丁
         PersonalDictManager.ensureSchemaPacks(context)
         // 不再在初始化阶段删 build：build 是否重建统一由 ensureDeployment()
@@ -166,8 +160,11 @@ object RimeConfigHelper {
         }
     
     fun initializeRimeData(context: Context): Pair<String, String> {
-        val rimeDir = File(context.filesDir, "rime")
-        
+        val rimeDir = SchemeFiles.rimeDir(context)
+
+        // 上次安装若在解压阶段被打断（EXTRACTING），先按压缩包重来一次，再读写 rime。
+        SchemeInstaller.recoverIfNeeded(context)
+
         migrateOldStructure(context, rimeDir)
         
         if (!rimeDir.exists()) {
@@ -175,12 +172,9 @@ object RimeConfigHelper {
         }
         
         copyAssetsToRimeDir(context, rimeDir)
-        // 升级兼容：同步初始化路径同样只推断并落盘 active_package_id
-        ActivePackageResolver.migrateIfNeeded(context)
-        // 同步初始化路径也按活动包收敛；失败则保持旧逻辑写回 schema_list
-        if (!SchemePackageState.reconcile(context)) {
-            SchemaManager.applyEnabledSchemasToDefaultYaml(context)
-        }
+        // 同步初始化路径同样先对齐状态，再镜像 schema_list
+        SchemeStore.ensure(context)
+        SchemaManager.applyEnabledSchemasToDefaultYaml(context)
         runBlocking { PersonalDictManager.ensureSchemaPacks(context) }
         // build 重建统一由 ensureDeployment() 增量优先决策，此处不删 build
         
@@ -344,41 +338,32 @@ object RimeConfigHelper {
         return digest.digest().joinToString("") { String.format("%02x", it) }
     }
 
+    /**
+     * 内置方案集播种：只在 `rime` 里**一个方案都没有**时铺一份。
+     *
+     * 判据是内容而不是一次性标记：有内容说明用户已经有一整套方案（内置或第三方），
+     * 不能覆盖；没有内容（全新安装、被清空、安装失败回退）才铺。
+     */
     private fun copyAssetsToRimeDir(context: Context, targetDir: File): Boolean {
-        // 判断 rime/ 是否已部署过任何方案（存在任意 <name>.schema.yaml）。
-        // 全新安装时 rime/ 为空 → 全量复制内置默认方案与系统文件，保证开箱即用。
-        // 一旦已部署过方案（内置旧版或从市场安装的第三方方案），app 更新时
-        // 一律不再用内置 assets 覆盖，避免覆盖第三方同名文件造成污染；
-        // 需要更新的方案统一走方案市场。此判定不依赖具体方案 id/文件名，天然鲁棒。
-        val alreadyHasSchemas = targetDir.listFiles()
-            ?.any { it.isFile && it.name.endsWith(".schema.yaml") } == true
-        if (alreadyHasSchemas) {
-            // 仅兜底确保 default.yaml 存在（librime 入口必需），缺失时补一份，不覆盖已有。
-            ensureDefaultYaml(context, targetDir)
-            // 默认方案强制更新（维护者决策）：默认方案随 app 发布、由维护者统一
-            // 维护，升级时以 assets 为准覆盖用户目录残留（治老版本升级残留废弃
-            // 配置——如引用已废弃 t9_translator 的旧 t9_pinyin 方案导致九键零候选）。
-            // 仅覆盖 assets 清单内的文件（内容比对，不同才写），清单外的第三方
-            // 方案一律跳过不处理。覆盖后文件内容变化使部署 hash 失配，后续
-            // ensureDeployment 按增量优先策略只重编受影响方案。
-            val updated = updateBuiltinAssets(context, targetDir)
-            if (updated > 0) {
-                Log.i(TAG, "Updated $updated builtin asset file(s)")
-            }
+        if (SchemeFiles.installedSchemaIds(targetDir).isNotEmpty()) {
+            // 已有方案集：只补用户模板与存量迁移，不碰方案文件
             seedAndMigrateDefaultCustom(context, targetDir)
             return false
         }
+
         val copied = try {
             copyAssetsRecursively(context, ASSETS_RIME_DIR, targetDir)
         } catch (e: IOException) {
             FileLogger.e(TAG, "Failed to copy assets", e)
             false
         }
-        if (copied) {
-            seedBuiltinPackageVersion(context)
-        }
+        if (!copied) return false
+
+        seedBuiltinPackageVersion(context)
+        ensureDefaultYaml(context, targetDir)
         seedAndMigrateDefaultCustom(context, targetDir)
-        return copied
+        FileLogger.i(TAG, "Seeded builtin schemas (rime was empty)")
+        return true
     }
 
     /**
@@ -427,50 +412,12 @@ object RimeConfigHelper {
         copyAssetFile(context, "$ASSETS_RIME_DIR/default.yaml", defaultYaml)
     }
     
-    /**
-     * 默认方案强制更新：递归遍历 assets 内置清单，对 .yaml/.lua 文件做内容比对，
-     * 缺失或内容不同才覆盖。assets 清单之外的第三方文件不受影响。
-     *
-     * 覆盖 default.yaml 会重置 schema_list，由调用方
-     * [SchemaManager.applyEnabledSchemasToDefaultYaml] 紧随其后恢复用户启用列表。
-     *
-     * @return 覆盖（含新增）的文件数。
-     */
-    private fun updateBuiltinAssets(context: Context, targetDir: File): Int {
-        var updated = 0
-        fun sync(assetSub: String, targetSub: File) {
-            val assetPath = if (assetSub.isEmpty()) ASSETS_RIME_DIR else "$ASSETS_RIME_DIR/$assetSub"
-            for (fileName in context.assets.list(assetPath) ?: return) {
-                val childAsset = if (assetSub.isEmpty()) fileName else "$assetSub/$fileName"
-                val childTarget = File(targetSub, fileName)
-                val subFiles = context.assets.list("$ASSETS_RIME_DIR/$childAsset")
-                if (!subFiles.isNullOrEmpty()) {
-                    childTarget.mkdirs()
-                    sync(childAsset, childTarget)
-                } else if (fileName.endsWith(".yaml") || fileName.endsWith(".lua")) {
-                    // *.custom.yaml 是补丁层文件（default.custom.yaml 归用户；
-                    // T9 注入与个人词库 packs 写 <schemaId>.custom.yaml），
-                    // 覆盖会抹掉用户配置与第三方方案——一律排除出默认覆盖范围
-                    if (fileName.endsWith(".custom.yaml")) continue
-                    // 共享预设正被方案包覆盖：保留第三方内容
-                    if (assetSub.isEmpty() && SharedPresetOverrides.hasActiveOverride(context, fileName)) continue
-                    if (!childTarget.exists() || !assetContentEquals(context, "$ASSETS_RIME_DIR/$childAsset", childTarget)) {
-                        copyAssetFile(context, "$ASSETS_RIME_DIR/$childAsset", childTarget)
-                        updated++
-                    }
-                }
-            }
-        }
-        sync("", targetDir)
-        return updated
-    }
-
     /** 补齐缺失/空的内置共享文件（不覆盖已有内容），返回补齐数。 */
     fun ensureBuiltinBaseFiles(context: Context): Int {
         val rimeDir = File(context.filesDir, "rime")
         if (!rimeDir.exists()) rimeDir.mkdirs()
         var restored = 0
-        for (name in SchemaManifestManager.sharedFileNames(context)) {
+        for (name in RimeSharedFiles.names(context)) {
             val target = File(rimeDir, name)
             if (target.isFile && target.length() > 0L) continue
             copyAssetFile(context, "$ASSETS_RIME_DIR/$name", target)
@@ -480,22 +427,6 @@ object RimeConfigHelper {
             }
         }
         return restored
-    }
-
-    /** 安装/导入后自动部署（补基线 → 词库补丁 → 增量部署，产物不完整再全量重编）。需在后台线程调用。 */
-    fun deployInstalledSchema(context: Context): Boolean {
-        ensureBuiltinBaseFiles(context)
-        // 安装完成后按新活动包收敛；失败时退回旧的 schema_list 镜像。
-        if (!SchemePackageState.reconcile(context)) {
-            SchemaManager.applyEnabledSchemasToDefaultYaml(context)
-        }
-        runBlocking { PersonalDictManager.ensureSchemaPacks(context) }
-        if (ensureDeployment(context) && isDeploymentComplete(context)) return true
-        // 产物不完整：清 hash 后全量重编一次；仍然缺产物就如实返回失败
-        SettingsPreferences.setDeploymentHash(context, "")
-        val deployed = RimeEngine.getInstance().deploy()
-        if (deployed) storeDeploymentHash(context)
-        return deployed && isDeploymentComplete(context)
     }
 
     /**
@@ -521,32 +452,8 @@ object RimeConfigHelper {
         return missing
     }
 
-    /** assets 文件与本地文件内容逐块比对（流式，避免大词典整读进内存）。 */
-    private fun assetContentEquals(context: Context, assetPath: String, target: File): Boolean {
-        return try {
-            context.assets.open(assetPath).use { assetStream ->
-                java.io.FileInputStream(target).use { fileStream ->
-                    val assetBuf = ByteArray(BUFFER_SIZE)
-                    val fileBuf = ByteArray(BUFFER_SIZE)
-                    while (true) {
-                        val nAsset = assetStream.read(assetBuf)
-                        val nFile = fileStream.read(fileBuf)
-                        if (nAsset != nFile) return false
-                        if (nAsset < 0) return true
-                        for (i in 0 until nAsset) {
-                            if (assetBuf[i] != fileBuf[i]) return false
-                        }
-                    }
-                    @Suppress("UNREACHABLE_CODE")
-                    true
-                }
-            }
-        } catch (_: IOException) {
-            false
-        }
-    }
 
-    private fun copyAssetsRecursively(context: Context, assetPath: String, targetDir: File): Boolean {
+    internal fun copyAssetsRecursively(context: Context, assetPath: String, targetDir: File): Boolean {
         val files = context.assets.list(assetPath)
         
         if (files.isNullOrEmpty()) {
