@@ -1011,6 +1011,7 @@
     <string name="s_shanchushibai_2">删除失败：%1$s</string>
     <string name="s_yilaiweiwanzheng">依赖未完整：%1$s</string>
     <string name="s_bushuwancheng_fanchacidian">部署完成，反查词典未编译：%1$s（需安装并启用对应方案）</string>
+    <string name="s_bushushibai_fanganweibianyi">部署失败，以下方案未编译：%1$s（请检查方案是否已启用、schema_list 是否被 default.custom.yaml 覆盖）</string>
     <string name="s_wenjian_chongtu_shiyong">%1$s（已被 %2$s 使用）</string>
     <string name="s_chajian_weiguanfang">插件「%1$s」未被标记为官方（%2$s）。</string>
     <string name="s_chajian_xinxi">插件：%1$s (%2$s) v%3$s %4$s</string>

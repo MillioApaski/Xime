@@ -1013,6 +1013,7 @@ internal object UiTextFallback {
         R.string.s_shanchushibai_2 to "删除失败：%1\$s",
         R.string.s_yilaiweiwanzheng to "依赖未完整：%1\$s",
         R.string.s_bushuwancheng_fanchacidian to "部署完成，反查词典未编译：%1\$s（需安装并启用对应方案）",
+        R.string.s_bushushibai_fanganweibianyi to "部署失败，以下方案未编译：%1\$s（请检查方案是否已启用、schema_list 是否被 default.custom.yaml 覆盖）",
         R.string.s_wenjian_chongtu_shiyong to "%1\$s（已被 %2\$s 使用）",
         R.string.s_chajian_weiguanfang to "插件「%1\$s」未被标记为官方（%2\$s）。",
         R.string.s_chajian_xinxi to "插件：%1\$s (%2\$s) v%3\$s %4\$s",

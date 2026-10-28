@@ -220,21 +220,32 @@ class SchemaSettingsViewModel(application: Application) : AndroidViewModel(appli
         if (_uiState.value.isDeploying) return
         viewModelScope.launch {
             _uiState.update { it.copy(isDeploying = true) }
-            val (success, missingReverseDicts) = withContext(Dispatchers.IO) {
+            val (deployed, missingSchemas, missingReverseDicts) = withContext(Dispatchers.IO) {
                 // 先补齐内置基础文件（symbols/default 等），避免方案 __include 失败导致编译报错
                 RimeConfigHelper.ensureBuiltinBaseFiles(context)
                 PersonalDictManager.ensureSchemaPacks(context)
                 KeysConfigHelper.loadConfig(context)
                 KeyboardThemes.reload(context)
-                val engine = RimeEngine.getInstance()
-                val deployed = engine.deploy()
+                // schema_list 归 app 管：先按 prefs 镜像并剥掉 default.custom.yaml 的覆盖块，
+                // 否则方案包自带的旧列表会让新启用的方案（如九键）漏编
+                SchemaManager.applyEnabledSchemasToDefaultYaml(context)
+                val deployed = RimeEngine.getInstance().deploy()
                 if (deployed) {
                     RimeConfigHelper.storeDeploymentHash(context)
                 }
-                deployed to RimeConfigHelper.missingReverseLookupTables(context)
+                // 部署返回成功≠每个方案都编译成功，按产物如实回报
+                val missingSchemas = RimeConfigHelper.missingCompiledSchemaNames(context)
+                Triple(deployed, missingSchemas, RimeConfigHelper.missingReverseLookupTables(context))
             }
             _uiState.update { it.copy(isDeploying = false) }
+            val complete = deployed && missingSchemas.isEmpty() &&
+                withContext(Dispatchers.IO) { RimeConfigHelper.isDeploymentComplete(context) }
             val missing = missingReverseDicts.map { it.second }.distinct()
+            if (missingSchemas.isNotEmpty()) {
+                FileLogger.e(
+                    "SchemaSettings", "部署后仍有方案未编译: ${missingSchemas.joinToString()}"
+                )
+            }
             if (missing.isNotEmpty()) {
                 FileLogger.w(
                     "SchemaSettings", "部署后反查词典仍缺编译产物: $missing（对应方案: ${missingReverseDicts.map { it.first }.distinct()}）"
@@ -242,7 +253,9 @@ class SchemaSettingsViewModel(application: Application) : AndroidViewModel(appli
             }
             showToast(
                 when {
-                    !success -> tr(R.string.s_bushushibai)
+                    missingSchemas.isNotEmpty() ->
+                        tr(R.string.s_bushushibai_fanganweibianyi, missingSchemas.joinToString("、"))
+                    !complete -> tr(R.string.s_bushushibai)
                     missing.isEmpty() -> tr(R.string.s_bushuwancheng)
                     // 反查词典由它自己的方案编译：缺产物时运行期会报 table.bin 不存在
                     else -> tr(R.string.s_bushuwancheng_fanchacidian, missing.joinToString("、"))

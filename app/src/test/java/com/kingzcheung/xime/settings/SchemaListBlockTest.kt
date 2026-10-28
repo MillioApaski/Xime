@@ -142,4 +142,41 @@ class SchemaListBlockTest {
             SchemaManager.mergeBuiltinSchemas(emptyList()),
         )
     }
+
+    // ---- parseSchemaListBlock：读取方案包 default.yaml 的开箱启用集 ----
+
+    @Test
+    fun `解析白霜包 default_yaml 的 schema_list`() {
+        val text = """
+            schema_list:
+              - schema: rime_frost             # 白霜拼音（全拼）
+              - schema: rime_frost_double_pinyin_mspy
+              - schema: rime_frost_t9
+              # - schema: rime_frost_double_pinyin_abc
+              - schema: rime_frost_wubi86
+
+            menu:
+              page_size: 8
+        """.trimIndent()
+        assertEquals(
+            listOf(
+                "rime_frost",
+                "rime_frost_double_pinyin_mspy",
+                "rime_frost_t9",
+                "rime_frost_wubi86",
+            ),
+            SchemaManager.parseSchemaListBlock(text),
+        )
+    }
+
+    @Test
+    fun `解析时忽略注释与引号`() {
+        val text = "schema_list:\n  - schema: \"a\" # x\n  - schema: 'b'\n"
+        assertEquals(listOf("a", "b"), SchemaManager.parseSchemaListBlock(text))
+    }
+
+    @Test
+    fun `没有 schema_list 时返回空`() {
+        assertTrue(SchemaManager.parseSchemaListBlock("menu:\n  page_size: 8\n").isEmpty())
+    }
 }

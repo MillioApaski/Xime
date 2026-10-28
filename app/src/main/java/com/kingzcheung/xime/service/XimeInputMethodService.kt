@@ -767,11 +767,13 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 val deploymentDone = SettingsPreferences.isDeploymentDone(this@XimeInputMethodService)
                 val needsDeployment = !deploymentDone || !RimeConfigHelper.isDeploymentComplete(this@XimeInputMethodService)
 
+                var deploymentOk = true
                 if (needsDeployment) {
                     // 统一部署入口（进程内互斥，hash 一致时内部跳过）。
                     // 与 XimeApplication 预初始化共享，避免两者并发触发两次全量编译。
                     notifyDeploymentStatus(true, tr(R.string.s_zhengzaibianyiciku))
-                    if (RimeConfigHelper.ensureDeployment(this@XimeInputMethodService)) {
+                    deploymentOk = RimeConfigHelper.ensureDeployment(this@XimeInputMethodService)
+                    if (deploymentOk) {
                         rimeEngine.updateLastBuildTime()
                     } else {
                         FileLogger.e(TAG, "initRimeEngine: ensureDeployment failed, deployment may not have completed")
@@ -784,8 +786,8 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                 val sessionReady = rimeEngine.ensureSession(180_000L)
                 if (sessionReady) {
                     Log.d(TAG, "initRimeEngine: Session ready")
-                    // 确保部署成功后才标记完成，避免首次部署超时后误标记
-                    if (needsDeployment) {
+                    // 确保部署成功后才标记完成，避免首次部署超时/方案未编译时误标记
+                    if (needsDeployment && deploymentOk) {
                         SettingsPreferences.setDeploymentDone(this@XimeInputMethodService, true)
                         RimeConfigHelper.storeDeploymentHash(this@XimeInputMethodService)
                     }

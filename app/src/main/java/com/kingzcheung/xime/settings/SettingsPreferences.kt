@@ -14,6 +14,12 @@ object SettingsPreferences {
     private const val KEY_BUILTIN_SCHEMAS_MERGED = "builtin_schemas_merged"
     /** 启用方案列表（有序，逗号连接；schema id 为 [a-z0-9_] 无逗号），持久真相。 */
     private const val KEY_ENABLED_SCHEMAS = "enabled_schemas"
+    /** 当前活动方案包 id（单活动包模型）；null 表示用户主动卸载了所有包。 */
+    private const val KEY_ACTIVE_PACKAGE_ID = "active_package_id"
+    /** 方案包状态迁移版本；0/缺失=升级前旧状态。 */
+    private const val KEY_SCHEME_STATE_VERSION = "scheme_state_version"
+    /** 是否已按活动包做过一次启用列表收敛（升级首启/全新安装）。 */
+    private const val KEY_SCHEME_RECONCILED = "scheme_reconciled"
     /** default.custom.yaml 的 schema_list 是否已迁移进 prefs（一次性）。 */
     private const val KEY_DEFAULT_CUSTOM_MIGRATED = "default_custom_schema_list_migrated"
     private const val KEY_PENDING_DICT_MERGE = "pending_dict_merge"
@@ -238,6 +244,32 @@ object SettingsPreferences {
 
     fun setEnabledSchemaList(context: Context, schemas: List<String>) {
         getPrefs(context).edit().putString(KEY_ENABLED_SCHEMAS, schemas.joinToString(",")).apply()
+    }
+
+    /** 当前活动方案包；null 表示没有活动包（用户主动卸载了所有包）。 */
+    fun getActivePackageId(context: Context): String? =
+        getPrefs(context).getString(KEY_ACTIVE_PACKAGE_ID, null)
+
+    fun setActivePackageId(context: Context, packageId: String?) {
+        getPrefs(context).edit().apply {
+            if (packageId == null) remove(KEY_ACTIVE_PACKAGE_ID)
+            else putString(KEY_ACTIVE_PACKAGE_ID, packageId)
+        }.apply()
+    }
+
+    /** 0/缺失 = 升级前旧状态；>=1 = 已完成 active_package_id 迁移。 */
+    fun getSchemeStateVersion(context: Context): Int =
+        getPrefs(context).getInt(KEY_SCHEME_STATE_VERSION, 0)
+
+    fun setSchemeStateVersion(context: Context, version: Int) {
+        getPrefs(context).edit().putInt(KEY_SCHEME_STATE_VERSION, version).apply()
+    }
+
+    fun isSchemeReconciled(context: Context): Boolean =
+        getPrefs(context).getBoolean(KEY_SCHEME_RECONCILED, false)
+
+    fun setSchemeReconciled(context: Context, reconciled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_SCHEME_RECONCILED, reconciled).apply()
     }
 
     fun isDefaultCustomMigrated(context: Context): Boolean {
@@ -673,6 +705,11 @@ object SettingsPreferences {
     /** 保存方案偏好的键盘布局 */
     fun setLayoutPreference(context: Context, schemaId: String, layout: String) {
         getPrefs(context).edit().putString("$KEY_LAYOUT_PREFIX$schemaId", layout).apply()
+    }
+
+    /** 方案卸载时清除该方案的布局偏好，避免同名方案重装后继承旧布局。 */
+    fun removeLayoutPreference(context: Context, schemaId: String) {
+        getPrefs(context).edit().remove("$KEY_LAYOUT_PREFIX$schemaId").apply()
     }
     
     fun getKeyboardHeightDp(context: Context): Int {
