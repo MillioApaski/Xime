@@ -950,11 +950,8 @@ fun KeyboardView(
                                     if (page is KeyboardPage.Panel) {
                                         viewModel.exitPanel()
                                     } else {
-                                        val mainTarget = viewModel.asciiStateMachine.targetFor(
-                                            AsciiKeyboardContext.MAIN, state.isAsciiMode
-                                        ) ?: state.isAsciiMode
                                         viewModel.setKeyboardState(
-                                            initialKeyboardLayoutState(mainTarget, state.currentSchemaId)
+                                            initialKeyboardLayoutState(state.isAsciiMode, state.currentSchemaId)
                                         )
                                     }
                                 }
@@ -973,11 +970,8 @@ fun KeyboardView(
                                     if (page is KeyboardPage.Panel) {
                                         viewModel.exitPanel()
                                     } else {
-                                        val mainTarget = viewModel.asciiStateMachine.targetFor(
-                                            AsciiKeyboardContext.MAIN, state.isAsciiMode
-                                        ) ?: state.isAsciiMode
                                         viewModel.setKeyboardState(
-                                            initialKeyboardLayoutState(mainTarget, state.currentSchemaId)
+                                            initialKeyboardLayoutState(state.isAsciiMode, state.currentSchemaId)
                                         )
                                     }
                                 }
@@ -995,16 +989,13 @@ fun KeyboardView(
                             when (key) {
                                 "shift", "shift_single", "shift_caps" -> viewModel.consumeShiftKey(key)
                                 "abc" -> {
-                                    // 返回主键盘：面板内 ascii 模式不应影响主键盘布局，
-                                    // 用主键盘记忆（或恢复进入面板前状态），避免"先英文后切回中文"闪变。
+                                    // 返回主键盘：符号/数字页不碰引擎中英态，
+                                    // 布局直接跟随引擎当前状态，避免记忆 fallback 误切中文显示
                                     if (page is KeyboardPage.Panel) {
                                         viewModel.exitPanel()
                                     } else {
-                                        val mainTarget = viewModel.asciiStateMachine.targetFor(
-                                            AsciiKeyboardContext.MAIN, state.isAsciiMode
-                                        ) ?: state.isAsciiMode
                                         viewModel.setKeyboardState(
-                                            initialKeyboardLayoutState(mainTarget, state.currentSchemaId)
+                                            initialKeyboardLayoutState(state.isAsciiMode, state.currentSchemaId)
                                         )
                                     }
                                 }
