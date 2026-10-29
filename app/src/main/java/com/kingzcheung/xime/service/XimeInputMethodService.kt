@@ -111,6 +111,7 @@ import com.kingzcheung.xime.settings.AppLocale
 import com.kingzcheung.xime.settings.SchemaConfigHelper
 import com.kingzcheung.xime.settings.SchemaManager
 import com.kingzcheung.xime.settings.SettingsPreferences
+import com.kingzcheung.xime.scheme.SchemeStore
 import com.kingzcheung.xime.settings.SyncManager
 import com.kingzcheung.xime.ui.keyboard.KeyboardView
 import com.kingzcheung.xime.ui.keyboard.isT9Schema
@@ -874,7 +875,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                             Log.d(TAG, "initRimeEngine: savedSchema '$savedSchema' not available, falling back to '$fallbackSchema'")
                             schemaController.applyPageSizeSetting(fallbackSchema)
                             rimeEngine.switchSchema(fallbackSchema)
-                            SettingsPreferences.setCurrentSchema(this@XimeInputMethodService, fallbackSchema)
+                            SchemeStore.setCurrent(this@XimeInputMethodService, fallbackSchema)
                         }
                     }
                     
@@ -2280,7 +2281,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                             }
                             schemaController.applyPageSizeSetting(fallbackSchema)
                             rimeEngine.switchSchema(fallbackSchema)
-                            SettingsPreferences.setCurrentSchema(this, fallbackSchema)
+                            SchemeStore.setCurrent(this, fallbackSchema)
                             actualSchema = fallbackSchema
                         } else {
                             debugLog("onStartInput: saved schema is handwriting, keeping handwriting mode")
@@ -2316,7 +2317,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
                         debugLog("onStartInput: savedSchema '$savedSchema' not available, falling back to '$fallbackSchema'")
                         schemaController.applyPageSizeSetting(fallbackSchema)
                         rimeEngine.switchSchema(fallbackSchema)
-                        SettingsPreferences.setCurrentSchema(this, fallbackSchema)
+                        SchemeStore.setCurrent(this, fallbackSchema)
                         actualSchema = fallbackSchema
                     }
                     else -> actualSchema = savedSchema

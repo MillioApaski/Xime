@@ -112,7 +112,30 @@ object RimeConfigHelper {
             }
             if (deployed) {
                 storeDeploymentHash(context)
-                val stillMissing = missingCompiledSchemas(context)
+                var stillMissing = missingCompiledSchemas(context)
+                if (stillMissing.isNotEmpty()) {
+                    // 新启用的方案不在上次 build 里：增量维护不会为它生成产物，
+                    // 先按单个方案编译（librime deploy_schema，同步），仍缺失再全量重来。
+                    FileLogger.w(
+                        TAG,
+                        "Compile missing schemas one by one: ${stillMissing.joinToString()}"
+                    )
+                    stillMissing.forEach { engine.deploySchema(it) }
+                    stillMissing = missingCompiledSchemas(context)
+                }
+                if (stillMissing.isNotEmpty()) {
+                    FileLogger.w(
+                        TAG,
+                        "Still missing after per-schema deploy, running full deploy: " +
+                            stillMissing.joinToString()
+                    )
+                    buildDir.deleteRecursively()
+                    buildDir.mkdirs()
+                    if (engine.deploy()) {
+                        storeDeploymentHash(context)
+                        stillMissing = missingCompiledSchemas(context)
+                    }
+                }
                 SettingsPreferences.setDeploymentDone(context, stillMissing.isEmpty())
                 if (stillMissing.isNotEmpty()) {
                     FileLogger.e(

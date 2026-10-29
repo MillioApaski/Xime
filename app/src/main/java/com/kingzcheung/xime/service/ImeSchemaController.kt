@@ -17,6 +17,7 @@ import com.kingzcheung.xime.settings.KeysConfigHelper
 import com.kingzcheung.xime.settings.SchemaConfigHelper
 import com.kingzcheung.xime.settings.SchemaManager
 import com.kingzcheung.xime.rime.RimeConfigHelper
+import com.kingzcheung.xime.scheme.SchemeStore
 import com.kingzcheung.xime.settings.SettingsPreferences
 import com.kingzcheung.xime.ui.theme.KeyboardThemes
 import com.kingzcheung.xime.util.FileLogger
@@ -262,7 +263,7 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
                 return
             }
             service.previousSchemaId = service.rimeEngine.getCurrentSchema()
-            SettingsPreferences.setCurrentSchema(service, schemaId)
+            SchemeStore.setCurrent(service, schemaId)
             service.keyboardViewModel.switchMain(com.kingzcheung.xime.keyboard.MainType.HANDWRITING)
             // 手写模型按"用键盘时加载"管理：切到手写方案即展示手写键盘，
             // 由 HandwritingKeyboardLayout 创建时（LaunchedEffect）负责加载，
@@ -274,7 +275,7 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
         com.kingzcheung.xime.handwriting.HandwritingEngine.release()
         service.keyboardViewModel.switchMain(com.kingzcheung.xime.keyboard.MainType.FULL)
         try {
-            SettingsPreferences.setCurrentSchema(service, schemaId)
+            SchemeStore.setCurrent(service, schemaId)
             // 用户自定义候选词数：先写 custom.yaml 再切方案，Rime 会自动加载
             applyPageSizeSetting(schemaId)
             // 部署/编译进行中 switchSchema 返回 false（不阻塞等待），
@@ -292,7 +293,7 @@ internal class ImeSchemaController(private val service: XimeInputMethodService) 
                 // IME 重启的恢复逻辑兜底，避免把空串写进偏好与 user.yaml
                 val actual = service.rimeEngine.getCurrentSchema()
                 if (actual.isNotEmpty()) {
-                    SettingsPreferences.setCurrentSchema(service, actual)
+                    SchemeStore.setCurrent(service, actual)
                 }
                 FileLogger.w(XimeInputMethodService.TAG, "switchSchema failed: target=$schemaId actual=$actual")
                 Toast.makeText(service, tr(R.string.s_fanganweibushu_qingzaifangangu_63cf5), Toast.LENGTH_SHORT).show()

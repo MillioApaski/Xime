@@ -547,8 +547,10 @@ class RimeEngine {
             return false
         }
         locked {
-            if (!nativeHasSession()) {
-                FileLogger.w(TAG, "switchSchema($schemaId) failed: no rime session")
+            // 设置页可能在没有键盘会话的进程里切方案（如应用刚重启、只开了设置页），
+            // 引擎启动时并不建 session（见 initialize 注释），这里补建一次再切。
+            if (!nativeHasSession() && !nativeCreateSession()) {
+                FileLogger.w(TAG, "switchSchema($schemaId) failed: cannot create rime session")
                 return false
             }
             // 在切换方案前，确保 T9 方案的 schema 补丁已注入
@@ -990,7 +992,8 @@ class RimeEngine {
 
     fun deploySchema(schemaId: String): Boolean {
         if (!isInitialized) return false
-        return nativeDeploySchema(schemaId)
+        // 与其它 native 入口一样持 rimeLock：部署期间不能有按键处理并发进入引擎
+        return locked { nativeDeploySchema(schemaId) }
     }
 
     fun updateLastBuildTime() {
