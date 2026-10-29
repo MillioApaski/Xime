@@ -17,6 +17,7 @@ object SettingsPreferences {
     private const val KEY_ACTIVE_PACKAGE_ID = "active_package_id"
     /** default.custom.yaml 的 schema_list 是否已迁移进 prefs（一次性）。 */
     private const val KEY_DEFAULT_CUSTOM_MIGRATED = "default_custom_schema_list_migrated"
+    private const val KEY_SCHEME_SELECTION_MIGRATED = "scheme_selection_v2_migrated"
     private const val KEY_PENDING_DICT_MERGE = "pending_dict_merge"
     private const val KEY_DEPLOYMENT_HASH = "deployment_hash"
     private const val KEY_SETUP_COMPLETED = "setup_completed"
@@ -240,6 +241,15 @@ object SettingsPreferences {
 
     fun setDefaultCustomMigrated(context: Context, migrated: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_DEFAULT_CUSTOM_MIGRATED, migrated).apply()
+    }
+
+    /** 旧版"无 schema_list 时猜第一个方案"的选择是否已作废（一次性迁移）。 */
+    fun isSchemeSelectionMigrated(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_SCHEME_SELECTION_MIGRATED, false)
+    }
+
+    fun setSchemeSelectionMigrated(context: Context, migrated: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_SCHEME_SELECTION_MIGRATED, migrated).apply()
     }
 
     /**

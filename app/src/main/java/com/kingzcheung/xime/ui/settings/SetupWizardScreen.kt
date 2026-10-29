@@ -31,6 +31,7 @@ import com.kingzcheung.xime.rime.RimeConfigHelper
 import com.kingzcheung.xime.rime.RimeEngine
 import com.kingzcheung.xime.settings.SchemaManager
 import com.kingzcheung.xime.settings.SettingsPreferences
+import com.kingzcheung.xime.scheme.SchemeStore
 import com.kingzcheung.xime.ui.ContentMaxWidth
 import com.kingzcheung.xime.ui.TwoPaneMinWidth
 import kotlinx.coroutines.Dispatchers
@@ -151,7 +152,7 @@ fun SetupWizardScreen(
                         // 用户可能根本没启用 wubi86，导致键盘无法输入中文
                         val enabled = SchemaManager.getEnabledSchemas(context)
                         if (enabled.isNotEmpty()) {
-                            SettingsPreferences.setCurrentSchema(context, enabled.first())
+                            SchemeStore.setCurrent(context, enabled.first())
                         }
                         SettingsPreferences.setSetupCompleted(context, true)
                         SettingsPreferences.setDeploymentDone(context, true)
